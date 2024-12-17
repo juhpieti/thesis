@@ -1,0 +1,214 @@
+---
+title: "Data exploration new covariates"
+output: pdf_document
+date: "2024-11-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load in the data
+
+```{r}
+df <- readRDS("../data/estonia_new/2024_QuantitativeSamplesCoverKeySpeciesWithCopernicusDataAndDepth.rds")
+table(df$year)
+
+### no copernicus variables for 2022 -->
+
+df <- df[df[,"year"] <= 2021,]
+
+### more recent than 2015
+#df <- df[df[,"year"] >= 2015, ]
+
+df <- as.data.frame(df)
+
+```
+
+Turn to 2D using EUREF-FIN
+
+```{r}
+library(terra)
+df.vect <- vect(df, geom = c("longitude","latitude"), crs = "EPSG:4326") #original data is in WGS84 (is it?)
+df.vect <- project(df.vect, "EPSG:3067")
+
+# crop a few "outliers"
+ext_vec <- c(120000,580000,6400000,6650000)
+df.vect <- crop(df.vect,ext_vec)
+
+europe.vect <- vect("../europe_coastline_shapefile/Europe_coastline_poly.shp")
+europe.vect <- project(europe.vect, "EPSG:3067")
+europe.vect <- crop(europe.vect, ext_vec)
+
+plot(europe.vect)
+plot(df.vect, add = TRUE, col = "red", cex = 0.5)
+```
+
+
+Take a year that has nicely spread covariates
+
+```{r}
+vars <- c("depth","no3_bottom","o2_bottom","po4_bottom","zsd","bottomT","so_bottom","current_bottom","chl_bottom")
+years <- 2015:2021
+
+par(mfrow = c(3,3),
+    mar = c(4,2,2,0))
+for (var in vars) {
+  hist(df[,var],breaks=40,probability=TRUE, xlab = "value", main = var)
+}
+
+for (year in years) {
+  ### plot map
+  par(mfrow = c(1,1))
+  plot(europe.vect, main = year)
+  plot(df.vect, add = TRUE, col = "red", cex = 0.5)
+  plot(df.vect[df.vect$year == year], col = "blue", cex = 0.7, add = TRUE)
+  
+  ### histograms of covariates
+  par(mfrow = c(3,3),
+      mar = c(4,2,2,0))
+  df_sub <- df[df[,"year"] == year, ]
+  for (var in vars) {
+    hist(df_sub[,var],breaks=40, xlab = "value", main = var, probability = TRUE)
+  }
+}
+```
+
+
+2020 or 2021 or combined?
+
+```{r}
+set.seed(123)
+### combined
+### take July, August?
+par(mfrow = c(1,1))
+plot(europe.vect, main = "2020-2021")
+plot(df.vect, add = TRUE, col = "red", cex = 0.5)
+df.vect.sub <- df.vect[df.vect$year %in% 2020:2021]
+df.vect.sub <- df.vect.sub[df.vect.sub$month %in% 5:9] # May to August
+rand_idx <- sample(1:nrow(df.vect.sub),500)
+df.vect.sub <- df.vect.sub[rand_idx,]
+plot(df.vect.sub, col = "blue", cex = 0.7, add = TRUE)
+
+### histograms of covariates
+par(mfrow = c(3,3),
+    mar = c(4,2,2,0))
+df_sub <- as.data.frame(df.vect.sub, geom = "XY")
+
+### take only the interesting covariates
+vars <- c("depth","no3_bottom","o2_bottom","po4_bottom","zsd","bottomT","so_bottom","current_bottom","chl_bottom")
+sp_list <- c("Amphibalanus improvisus","Chara aspera","Chara tomentosa",
+             "Chorda filum","Cladophora glomerata","Fucus vesiculosus",
+             "Furcellaria lumbricalis","Furcellaria lumbricalis loose form",
+             "Myriophyllum spicatum","Mytilus trossulus","Potamogeton perfoliatus",
+             "Pylaiella/Ectocarpus","Ruppia maritima","Stuckenia pectinata",
+             "Tolypella nidifica","Ulva intestinalis","Vertebrata fucoides",
+             "Zannichellia palustris","Zostera marina")
+
+df_sub <- df_sub[,c(colnames(df_sub)[1:8],"x","y",vars,sp_list)]
+### save the data
+save(df_sub, file = "../data/estonia_new/train_2020_2021.Rdata")
+for (var in vars) {
+  hist(df_sub[,var],breaks=40, xlab = "value", main = var, probability = TRUE)
+}
+
+for (year in 2020:2021) {
+  ### plot map
+  par(mfrow = c(1,1))
+  plot(europe.vect, main = year)
+  plot(df.vect, add = TRUE, col = "red", cex = 0.5)
+  df.vect.sub <- df.vect[df.vect$year == year]
+  df.vect.sub <- df.vect.sub[df.vect.sub$month %in% 7:8]
+  rand_idx <- sample(1:nrow(df.vect.sub),500)
+  df.vect.sub <- df.vect.sub[rand_idx, ]
+  plot(df.vect.sub, col = "blue", cex = 0.7, add = TRUE)
+  
+  ### histograms of covariates
+  par(mfrow = c(3,3),
+      mar = c(4,2,2,0))
+  df_sub <- as.data.frame(df.vect.sub, geom = "XY")
+  df_sub <- df_sub[,c(colnames(df_sub)[1:8],"x","y",vars,sp_list)]
+  file_name <- paste0("train_",year,".Rdata")
+  save(df_sub, file = paste0("../data/estonia_new/",file_name))
+  for (var in vars) {
+    hist(df_sub[,var],breaks=40, xlab = "value", main = var, probability = TRUE)
+  }
+}
+```
+
+
+Look at a subset (year 2020)
+
+```{r}
+library(corrplot)
+#load("../data/estonia_new/train_2020_2021.Rdata")
+df_2021_2022 <- df[df[,"year"] %in% 2021:2022, ]
+vars <- c("chl_bottom","nh4_bottom","no3_bottom","nppv_bottom","o2_bottom","o2b","ph_bottom","po4_bottom")
+corrMat <- cor(df_2021_2022[,vars])
+corrplot(corrMat, type = "upper", order = "hclust", method = "number")
+```
+
+
+```{r}
+grid_points <- readRDS("../data/estonia_new/BGC_003_012 and PHY_003_011 Copernicus grid points.rds")
+head(grid_points)
+```
+
+
+### Depth map
+
+```{r}
+depth <- readRDS("../data/estonia_new/depth_SWM_SWM-Bekkby.rds")
+ext_rast <- c(min(depth$x),max(depth$x),min(depth$y),max(depth$y))
+res <- 1
+r <- rast(extent = ext_rast, crs = "EPSG:3035") ### which coordinate system is this?
+depth.rast <- rasterize(as.matrix(depth[,c("x","y")]),r,values=depth$depth.mean)
+
+depth.rast_new <- project(depth.rast, "EPSG:3067")
+
+load("../data/estonia_new/train_2020_2021.Rdata")
+obs.vect <- vect(df_sub, geom = c("x","y"), crs = "EPSG:3067")
+
+plot(depth.rast_new)
+plot(obs.vect, add = TRUE, col = "red", cex=0.5)
+```
+
+```{r}
+### bring in observations
+load("../data/estonia_new/train_2020_2021.Rdata")
+obs.vect <- vect(df_sub, geom = c("x","y"), crs = "EPSG:3067")
+
+#depth.rast.eur <- crop(depth.rast_new, europe.vect)
+depth.rast.eur <- crop(depth.rast_new, grid_raster)
+
+europe.vect <- vect("../europe_coastline_shapefile/Europe_coastline_poly.shp")
+europe.vect <- project(europe.vect, "EPSG:3067")
+europe.vect <- crop(europe.vect, grid_raster)
+
+plot(depth.rast.eur)
+plot(europe.vect, add = TRUE, col = "grey")
+plot(obs.vect, add = TRUE, col = "red", cex = 0.8)
+```
+
+
+### plot the depth points and copernicus grid points 
+
+```{r}
+grid_points_vect <- vect(grid_points, geom = c("longitude_wgs84","latitude_wgs84"), crs = "EPSG:4326")
+grid_points_vect <- project(grid_points_vect, "EPSG:3067")
+
+load("../data/estonia_new/copernicus_grid_2021_July.Rdata")
+
+grid_points_vect <- terra::subset(grid_points_vect, id_copernicus_phy_bgc %in% unique(grid_2021$id_copernicus_phy_bgc), NSE = T)
+
+plot(depth.rast.eur)
+plot(europe.vect, add = TRUE, col = "grey")
+plot(obs.vect, add = TRUE, col = "red", cex = 0.8)
+plot(grid_points_vect, add = TRUE, col = "white", cex = 0.4)
+```
+
+
+
+
+
+

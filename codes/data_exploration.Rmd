@@ -1,0 +1,110 @@
+---
+title: "Visualizing the data"
+output: pdf_document
+date: "2024-09-01"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Let's load in the `terra` package necessary for handling GIS data with R.
+
+```{r}
+library(terra)
+```
+
+read in the csv data
+
+```{r}
+hanko1 <- read.csv("../data/hanko1/velmu.to.Obama.2023-06-19.csv", header = TRUE,sep=",")
+hanko1[1:5,1:5]
+```
+
+Visualize the raster layers
+
+```{r}
+sal.rast <- rast("../data/hanko1/sal_rasters_Obama.2023-06-19.tif")
+sal.rast
+plot(sal.rast, main = "surface salinity")
+```
+
+```{r}
+surf_expo.rast <- rast("../data/hanko1/surf_expo_rasters_Obama.2023-06-19.tif")
+surf_expo.rast
+plot(surf_expo.rast, main = "surface exposure")
+```
+
+```{r}
+turb.rast <- rast("../data/hanko1/turb_rasters_Obama.2023-06-19.tif")
+turb.rast
+plot(turb.rast, main = "water turbidity")
+```
+
+```{r}
+seashare.rast <- rast("../data/hanko1/seashare_rasters_Obama.2023-06-19.tif")
+seashare.rast
+plot(seashare.rast, main = "seashare-%")
+```
+
+```{r}
+depth_class.rast <- rast("../data/hanko1/depth_classes_rasters_Obama.2023-06-19.tif")
+depth_class.rast
+plot(depth_class.rast, main = "categorized depth")
+```
+
+```{r}
+ruov.data <- rast("../data/hanko1/ruov_rasters_Obama.2023-06-19.tif")
+ruov.data
+plot(ruov.data, main = "reeds")
+```
+
+See where the sampling locations are. First convert the data to vector data.
+
+```{r}
+hanko1.vect <- vect(hanko1,geom=c("X_coord","Y_coord"),crs=crs(sal.rast))
+hanko1.vect
+
+# save the observations if e.g. preferred to visualized in GQIS
+writeVector(hanko1.vect, filename = "../shape_files_observations/hanko1/observations.shp", overwrite = TRUE)
+```
+
+Visualize and add the sampling locations with red.
+
+```{r}
+plot(sal.rast, main = "observations", col = "lightblue", legend = FALSE)
+plot(hanko1.vect, add = TRUE, col="black",cex = 0.5)
+```
+
+Examine one species of interest.
+
+```{r}
+hist(hanko1[,"Zostera.marina"],breaks=40,
+     main = "Zostera Marina", xlab = "proportion")
+```
+
+Seems to be mostly zeroes in the data, let's see more accurately.
+
+```{r}
+mean(hanko1[,"Zostera.marina"] == 0)
+hist(hanko1[hanko1[,"Zostera.marina"] != 0,"Zostera.marina"],breaks=40,
+     main = "Zostera Marina zeros excluded", xlab = "proportion")
+```
+
+Definitely, almost $99\%$ is zero proportions, excluding those give a nice set of proportions from $\approx 0\%$ to $\approx 90\%$
+
+Plot and color with the level of abundance for the certain species
+
+```{r}
+plot(sal.rast, main = "observations of Zostera Marina", col = "grey", legend = FALSE)
+plot(hanko1.vect, col = c("forestgreen","red")[(hanko1[,"Zostera.marina"] == 0) + 1],
+     cex = c(1,0.5)[(hanko1[,"Zostera.marina"] == 0) + 1], add = TRUE)
+legend(338000,6680000, legend = c("present","absent"), pch = 19, col = c("forestgreen","red"), cex = 0.8)
+```
+
+Check what generally are the prevalences of the species?
+
+```{r}
+apply(hanko1[,9:80], 2, function(col) (100*mean(col != 0)))
+```
+

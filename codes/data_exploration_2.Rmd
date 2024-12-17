@@ -1,0 +1,115 @@
+---
+title: "Visualizing the data"
+subtitle: "2.0"
+output: pdf_document
+date: "2024-09-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(terra)
+```
+
+# load in the datasets
+
+### New Hanko data
+
+```{r}
+hanko2 <- read.csv("../data/hanko2/velmu.to.Obama.2024-09-05.csv", header = TRUE)
+head(hanko2)
+```
+
+Turn into shapefile for plotting, add also some background map
+
+```{r}
+baltic.vect <- vect("../baltic_sea_shapefile/DrainageBasin_1.shp")
+baltic.vect <- project(baltic.vect, "EPSG:3067")
+baltic.vect
+plot(baltic.vect)
+
+europe.vect <- vect("../europe_coastline_shapefile/Europe_coastline_poly.shp")
+europe.vect <- project(europe.vect, "EPSG:3067")
+plot(europe.vect)
+```
+
+```{r}
+ext_vec <- c(260000,355000,6610000,6670000)
+baltic.vect.cut <- crop(baltic.vect, ext_vec)
+europe.vect.cut <- crop(europe.vect, ext_vec)
+#plot(baltic.vect.cut)
+#plot(europe.vect.cut)
+
+sal.rast <- rast("../data/hanko1/sal_rasters_Obama.2023-06-19.tif")
+hanko2.vect <- vect(hanko2,geom=c("X_coord","Y_coord"),crs=crs(sal.rast))
+plot(sal.rast, main = "Hanko new observations", col = "lightgrey", legend = FALSE)
+plot(europe.vect.cut, add = TRUE)
+plot(hanko2.vect,add=TRUE,cex=0.4,col="blue")
+```
+
+How many species do we have in the data?
+
+```{r}
+head(unique(hanko2[,"scientificName"]),10)
+length(unique(hanko2[,"scientificName"]))
+```
+
+What are the prevalences for each species?
+I assign absence if the cover is under $1\%$
+
+```{r}
+hist(hanko2[hanko2[,"Cover"] <= 100,"Cover"], main = "Histogram of the covers, all species", xlab = "Cover")
+
+for (sp_name in unique(hanko2[,"scientificName"])) {
+  df_sp <- hanko2[hanko2[,"scientificName"] == sp_name, ]
+  prev <- mean(df_sp[,"Cover"] >= 1)
+  print(paste0(sp_name,": ",round(prev,3)))
+}
+```
+
+```{r}
+length(unique(hanko2[,"TransectId"]))
+```
+
+
+### Estonia data
+
+```{r}
+library(readxl)
+estonia <- read_excel("../data/estonia/2024_QuantitativeSamplesCoverKeySpecies.xlsx")
+estonia <- as.data.frame(estonia)
+head(estonia)
+```
+
+Turn to shapefile, use same projection as with Hanko data
+
+```{r}
+estonia.vect <- vect(estonia, geom = c("longitude","latitude"), crs = "EPSG:4326") #original data is in WGS84 (is it?)
+estonia.vect <- project(estonia.vect, "EPSG:3067")
+plot(estonia.vect, cex = 0.5, main = "Estonia observations")
+plot(sal.rast, add = TRUE, col = "lightblue", legend = FALSE)
+```
+
+Let's crop the Estonia data
+
+```{r}
+ext_vec <- c(0,566613.8,6000000,6734429)
+estonia.vect.cut <- crop(estonia.vect,ext_vec)
+plot(estonia.vect.cut, cex = 0.5, main = "Estonia observations cropped")
+plot(sal.rast, add = TRUE, col = "lightblue", legend = FALSE)
+```
+
+And plot it with the Hanko data and backgroung.
+
+```{r}
+ext_vec <- c(10000,650000,6350000,6800000)
+baltic.vect.cut <- crop(baltic.vect, ext_vec)
+europe.vect.cut <- crop(europe.vect, ext_vec)
+plot(europe.vect.cut)
+#plot(baltic.vect.cut)
+plot(hanko2.vect, add = TRUE, col = "blue", cex = 0.4)
+plot(estonia.vect.cut, add = TRUE, col = "red", cex = 0.4)
+```
+
