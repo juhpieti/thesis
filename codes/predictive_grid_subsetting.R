@@ -1,3 +1,5 @@
+### script to make predictive grid for specified subregion of Baltic sea
+
 library(terra)
 
 grid_2021 <- read.csv("data/estonia_new/Copernicus_grid_2021.csv")
