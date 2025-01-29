@@ -1,5 +1,6 @@
-### take a relevant subset of the huge dataset 
+### take a relevant subset of the huge estonia dataset
 
+# load in packages
 library(terra)
 
 # load in the data
@@ -9,7 +10,7 @@ estonia <- as.data.frame(estonia)
 head(estonia)
 
 # change the CRS system to same as with Finnish data
-estonia.vect <- vect(estonia, geom = c("longitude","latitude"), crs = "EPSG:4326") #original data is in WGS84 (is it?)
+estonia.vect <- vect(estonia, geom = c("longitude","latitude"), crs = "EPSG:4326") #original data is in WGS84
 estonia.vect <- project(estonia.vect, "EPSG:3067")
 
 # take a subset of the data
@@ -61,18 +62,19 @@ for (sp_name in sp_list) {
   text(50,0.1,paste0(prevalences[sp_name],"%"), col = "red")
 }
 
-### visualize the subset of data
+### visualize the subset (by years) of the data
 # first subset with year(s)
 set.seed(123)
-estonia_sub <- estonia[estonia[,"year"] %in% c(2022), ]
-estonia_sub <- estonia_sub[sample(1:nrow(estonia_sub), 500, replace = FALSE), ]
-estonia_sub.vect <- vect(estonia_sub, geom = c("x","y"), crs = "EPSG:3067")
+estonia_sub <- estonia[estonia[,"year"] %in% c(2022), ] #year 2022
+estonia_sub <- estonia_sub[sample(1:nrow(estonia_sub), 500, replace = FALSE), ] #random sample with n = 500
+estonia_sub.vect <- vect(estonia_sub, geom = c("x","y"), crs = "EPSG:3067") 
 
 #without subsetting by years
 # set.seed(123)
 # estonia_sub <- estonia[sample(1:nrow(estonia), 500, replace = FALSE), ]
 # estonia_sub.vect <- vect(estonia_sub, geom = c("x","y"), crs = "EPSG:3067")
 
+# visualize along the whole data spatially, is well distributed across the area?
 par(mfrow = c(1,1))
 plot(estonia.vect.cut, cex = 0.5, main = "Estonia observations cropped", col = "red")
 plot(europe.vect.cut, add = TRUE)

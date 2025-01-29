@@ -1,4 +1,6 @@
 ### utility functions to be downloaded in different scripts
+
+# load in libraries
 library(rdist)
 
 exp_covariance <- function(s1,s2,sigma2,l) {
@@ -84,6 +86,7 @@ fit_binomial_regression <- function(y,X,n_chains=4,n_iter=500,add_iid_noise=FALS
   }
   mod <- stan(file,data=data_list,chains=n_chains,iter=n_iter,seed=42)
 }
+
 check_convergence <- function(stan_fit,is_iid_noise=FALSE) {
   param_list <- c("alpha","beta")
   if(is_iid_noise) {
@@ -98,7 +101,6 @@ calc_loo <- function(stan_fit) {
   return(fit.loo$estimates[1,1])
 }
 
-### plot the inference results
 inv_logit <- function(lin.pred) {
   return(1/(1+exp(-lin.pred)))
 }
@@ -174,71 +176,66 @@ plot_responses <- function(stan_fit, X.train, X.orig, is_standardized = TRUE, se
   }
 }
 
-plot_responses_hanko <- function(stan_fit, X.train, X.orig, is_standardized = TRUE, is_iid_noise = FALSE, ymin=0, ymax=1, plot_nx=3, plot_ny=3) {
-  ###
-  
-  alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
-  beta_sam <- as.matrix(stan_fit, pars = c("beta"))
-  
-  ### response curves
-  par(mfrow = c(plot_nx,plot_ny))
-  
-  ### prepare a grid matrix
-  x_grid <- c()
-  for (i in 1:ncol(X.train)) {
-    x_grid <- cbind(x_grid, seq(min(X.orig[,i]),max(X.orig[,i]),length=500))
-  }
-  x_grid_orig <- x_grid
-  
-  ### scale if the X.train also standardized
-  if (is_standardized) {
-    x_grid <- scale_covariates(X.orig,x_grid)
-  }
-  
-  for (i in 1:ncol(X.train)) {
-    var_name <- colnames(X.train)[i]
-    f <- mean(alpha_sam) + x_grid[,i] * mean(beta_sam[,i])
-    
-    plot(x_grid_orig[,i],inv_logit(f),type="l",
-         ylab="prob. of occ.",xlab="standardized value",
-         main=colnames(X.train)[i],ylim = c(ymin,ymax))
-  }
-}
-
-plot_responses_categorical <- function(stan_fit, X.train, X.orig=NULL, is_standardized = FALSE, is_iid_noise = FALSE, xmin=0, xmax=60, ymin=0, ymax=1, plot_nx=3, plot_ny = 3) {
-  ### plots the response curves
-  # stan_fit: stanfit object
-  # X.train: matrix X used to fit the model
-  # X.orig: original data matrix (in case X.train is a scaled version)
-  # is_standardized: boolean telling whether the X.train is standardized (1) or not (0)
-  # is_iid_noise: boolean telling whether random noise was added on top of f = a + Xb
-  alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
-  beta_sam <- as.matrix(stan_fit, pars = c("beta"))
-
-  par(mfrow = c(plot_nx,plot_ny))
-  for(i in which(colnames(X.train) != "depth")) {
-    depth_idx <- which(colnames(X.train) == "depth")
-    depth_grid <- seq(xmin,xmax,.1)
-    depth_grid_orig <- depth_grid
-    
-    # if standardized regression, depth has to be turn into standardized version
-    if (is_standardized) {
-      depth_grid <- scale_covariates(as.matrix(X.orig[,depth_idx]),matrix(depth_grid,ncol=1))
-    }
-    
-    var_name <- colnames(X.train)[i]
-    f <- mean(alpha_sam) + mean(beta_sam[,i]) + depth_grid * mean(beta_sam[,depth_idx])
-    
-    plot(depth_grid_orig,inv_logit(f),type="l",
-         ylab = "prob. of occ.", xlab = "depth",
-         main = colnames(X.train)[i], ylim = c(ymin,ymax))
-  }
-  
-}
-
-
-
-### CHECK THIS!
+# plot_responses_hanko <- function(stan_fit, X.train, X.orig, is_standardized = TRUE, is_iid_noise = FALSE, ymin=0, ymax=1, plot_nx=3, plot_ny=3) {
+#   
+#   alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
+#   beta_sam <- as.matrix(stan_fit, pars = c("beta"))
+#   
+#   ### response curves
+#   par(mfrow = c(plot_nx,plot_ny))
+#   
+#   ### prepare a grid matrix
+#   x_grid <- c()
+#   for (i in 1:ncol(X.train)) {
+#     x_grid <- cbind(x_grid, seq(min(X.orig[,i]),max(X.orig[,i]),length=500))
+#   }
+#   x_grid_orig <- x_grid
+#   
+#   ### scale if the X.train also standardized
+#   if (is_standardized) {
+#     x_grid <- scale_covariates(X.orig,x_grid)
+#   }
+#   
+#   for (i in 1:ncol(X.train)) {
+#     var_name <- colnames(X.train)[i]
+#     f <- mean(alpha_sam) + x_grid[,i] * mean(beta_sam[,i])
+#     
+#     plot(x_grid_orig[,i],inv_logit(f),type="l",
+#          ylab="prob. of occ.",xlab="standardized value",
+#          main=colnames(X.train)[i],ylim = c(ymin,ymax))
+#   }
+# }
+# 
+# plot_responses_categorical <- function(stan_fit, X.train, X.orig=NULL, is_standardized = FALSE, is_iid_noise = FALSE, xmin=0, xmax=60, ymin=0, ymax=1, plot_nx=3, plot_ny = 3) {
+#   ### plots the response curves
+#   # stan_fit: stanfit object
+#   # X.train: matrix X used to fit the model
+#   # X.orig: original data matrix (in case X.train is a scaled version)
+#   # is_standardized: boolean telling whether the X.train is standardized (1) or not (0)
+#   # is_iid_noise: boolean telling whether random noise was added on top of f = a + Xb
+#   alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
+#   beta_sam <- as.matrix(stan_fit, pars = c("beta"))
+# 
+#   par(mfrow = c(plot_nx,plot_ny))
+#   for(i in which(colnames(X.train) != "depth")) {
+#     depth_idx <- which(colnames(X.train) == "depth")
+#     depth_grid <- seq(xmin,xmax,.1)
+#     depth_grid_orig <- depth_grid
+#     
+#     # if standardized regression, depth has to be turn into standardized version
+#     if (is_standardized) {
+#       depth_grid <- scale_covariates(as.matrix(X.orig[,depth_idx]),matrix(depth_grid,ncol=1))
+#     }
+#     
+#     var_name <- colnames(X.train)[i]
+#     f <- mean(alpha_sam) + mean(beta_sam[,i]) + depth_grid * mean(beta_sam[,depth_idx])
+#     
+#     plot(depth_grid_orig,inv_logit(f),type="l",
+#          ylab = "prob. of occ.", xlab = "depth",
+#          main = colnames(X.train)[i], ylim = c(ymin,ymax))
+#   }
+#   
+# }
 
 plot_responses_highord <- function(stan_fit, X, is_iid_noise=FALSE, xmin = -3, xmax = 3, ymin = 0, ymax = 0.5, plot_nx=3, plot_ny=3) {
   ### plot the coefficient distributions
@@ -269,7 +266,6 @@ plot_responses_highord <- function(stan_fit, X, is_iid_noise=FALSE, xmin = -3, x
          main=colnames(X)[i],ylim = c(ymin,ymax))
   }
 }
-
 
 plot_responses_binomial_regression <- function(stan_fit, X.train, X.orig, is_standardized = TRUE, second_order = FALSE, xmin=-3, xmax=3, ymin=0, ymax=1, plot_nx=3, plot_ny=3) {
   ###
@@ -321,6 +317,10 @@ plot_responses_binomial_regression <- function(stan_fit, X.train, X.orig, is_sta
          main=colnames(X.train)[i],ylim = c(ymin,ymax))
   }
 }
+
+####################################################################################################################################
+################################################ THE USEFUL ONES ###################################################################
+####################################################################################################################################
 
 plot_responses_beta_regression <- function(stan_fit, X.train, X.orig, is_standardized = TRUE, second_order = TRUE, xmin=-3, xmax=3, ymin=0, ymax=1,
                                            plot_nx=3, plot_ny=3,a=1,type="expectation") {

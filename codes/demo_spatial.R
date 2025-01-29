@@ -2,26 +2,34 @@
 #### fit for two species
 #### compare the result with non-spatial
 
+# load in pacakges
 library(terra)
-library(rstan)
 library(loo)
 library(ggplot2)
+
+# load in stan
+library(rstan)
 options(mc.cores = parallel::detectCores())
 rstan_options(auto_write = TRUE)
 
-# load in the subset data
+# load in the training data
 #load("data/estonia_sub/estonia_sub_df.RData")
 load("data/estonia_new/train_2020_2021.Rdata")
+
+# load in the helper functions
 source("codes/helpers.R")
 
 estonia_sub <- df_sub
 
-# in the data there are three species with less than 10 observations, I will delete them
+# in the data there are three species with less than 5 observations, I will delete them
 estonia_sub <- estonia_sub[,!(colnames(estonia_sub) %in% c("Furcellaria lumbricalis loose form","Tolypella nidifica","Chara tomentosa"))]
 
-europe.vect <- vect("europe_coastline_shapefile/Europe_coastline_poly.shp")
-europe.vect <- project(europe.vect, "EPSG:3067")
 
+### visualize the data spatially
+europe.vect <- vect("europe_coastline_shapefile/Europe_coastline_poly.shp")
+europe.vect <- project(europe.vect, "EPSG:3067") #reproject to TM35FIN
+
+# crop for some region of interest
 ext_vec <- c(0,566613.8,6000000,6650000)
 europe.vect.cut <- crop(europe.vect,ext_vec)
 
@@ -30,10 +38,12 @@ estonia_sub.vect <- vect(estonia_sub, geom = c("x","y"), crs = "EPSG:3067")
 par(mfrow = c(1,1))
 plot(estonia_sub.vect, cex = 1, col = "red", main = "observations")
 plot(europe.vect.cut, add = TRUE, col = "lightgrey")
+plot(estonia_sub.vect, cex = 1, col = "red", main = "observations", add = TRUE)
 
-### we want an even grid to the area except the coast
+### for spatial random effect we want an even grid to the area except the coast
 # parameters of the grid
-ext_vec_grid <- ext(c(120000,560000,6300000,6640000))
+#ext_vec_grid <- ext(c(120000,560000,6300000,6640000))
+ext_vec_grid <- ext(c(140000,560000,6320000,6640000))
 length_grid_cell <- 20000 #20km x 20km grid
 ncols <- ( ext_vec_grid[2] - ext_vec_grid[1] ) / length_grid_cell
 nrows <- ( ext_vec_grid[4] - ext_vec_grid[3] ) / length_grid_cell
@@ -45,10 +55,14 @@ grid_raster <- rast(ext_vec_grid,ncols=ncols,nrows=nrows, crs = "EPSG:3067")
 grid_vector <- as.polygons(grid_raster)
 cropped_grid <- erase(grid_vector, europe.vect.cut)
 
+# plot the grid
 par(mfrow = c(1,1))
 plot(cropped_grid, main = "prediction grid")
 plot(estonia_sub.vect, add = TRUE, col = "red")
 plot(europe.vect.cut, add = TRUE, col = "lightgrey")
+
+# save the spatial random effect grid
+writeVector(cropped_grid, filename = "data/estonia_new/spatial_random_effect_grid.shp")
 
 ### take centre points and create space matrix (s1,s2) with coordinates
 ### put it in the model such that they have a gaussian process
@@ -57,7 +71,7 @@ plot(europe.vect.cut, add = TRUE, col = "lightgrey")
 grid_centers <- centroids(cropped_grid)
 grid_centers.df <- as.data.frame(grid_centers, geom = "XY")
 
-dim(grid_centers.df) # there are m = 202 grid cells
+dim(grid_centers.df) # there are m = 182 grid cells
 
 ### create a P matrix (nxm) matrix that tells to which grid cell each observation belongs to
 nearest_grid_center <- nearest(estonia_sub.vect, grid_centers)
@@ -88,11 +102,11 @@ X.sec_ord <- add_second_order_terms(X.scaled,colnames(X.scaled))
 ### Amphibalanus
 
 amphi <- estonia_sub[,"Amphibalanus improvisus"]
-amphi.01 <- amphi/100
+amphi.01 <- amphi/100 # beta regression takes values from [0,1]
 
 loo_amphi.spat <- c()
 
-### put the coordinates in km
+### put the coordinates in km instead of meters
 observed_grid_cells.df <- observed_grid_cells.df/1000
 
 ### run models
@@ -111,10 +125,10 @@ mod_amphi.beta_spat <- stan("stan_files/left_censored_beta_regression_spatial.st
 #save loo
 loo_amphi.spat <- c(loo_amphi.spat,loo(mod_amphi.beta_spat)$elpd_loo)
 
-#posterior predictive
+### posterior predictive checks
+# histogram of coverages in original data
 par(mfrow = c(4,4),
     mar = c(2,4,2,0))
-
 hist(amphi.01, breaks = 10, xlim = c(0,1), main = "obs", ylim = c(0,500))
 
 alpha.sam <- as.matrix(mod_amphi.beta_spat, pars = c("alpha"))
@@ -124,6 +138,7 @@ phi.sam <- as.matrix(mod_amphi.beta_spat, pars = c("phi"))
 
 a <- 1
 
+# make n_rep replications of new data, compare to observed coverages
 n_rep <- 15
 rep_idx <- sample(1:nrow(beta.sam),n_rep,replace = FALSE)
 for (i in 1:n_rep) {
@@ -155,9 +170,9 @@ grid.vect <- cropped_grid
 shoreline.vect <- europe.vect.cut
 obs.vect <- estonia_sub.vect
 
+# plot the spatial effects
 plot_spatial_effects_beta(mod_amphi.beta_spat,s_obs,s_pred,grid.vect,obs.vect,shoreline.vect)
   
-
 #save the loo values
 load("results/demo/loo_table.Rdata")
 loo_table <- cbind(loo_table, "Beta spat." = c(loo_amphi.spat,rep(0,3)))
@@ -230,9 +245,6 @@ shoreline.vect <- europe.vect.cut
 obs.vect <- estonia_sub.vect
 
 plot_spatial_effects_ZIBeta(mod_amphi.ZIBeta_spat,s_obs,s_pred,grid.vect,obs.vect,shoreline.vect)
-
-
-
 
 #save the loo values
 loo_table <- cbind(loo_table, "ZI-Beta spat." = rep(0,4))

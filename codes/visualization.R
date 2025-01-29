@@ -1,12 +1,17 @@
 ### script to visualize the data used for modeling
 ### this is a subset (n = 500) using year 2022 in the estonia data
 
+#load in packages
+library(terra)
+
 #load("data/estonia_sub/estonia_sub_df.RData")
 load("data/estonia_new/train_2020_2021.Rdata")
 
+# check how many presences in the data
 colSums(df_sub[,20:38] > 0)
 estonia_sub <- df_sub
 
+# remove species with less than 5 (0, 1, 2 in this case) observations
 estonia_sub <- estonia_sub[,!(colnames(estonia_sub) %in% c("Furcellaria lumbricalis loose form","Tolypella nidifica","Chara tomentosa"))]
 
 par(mfrow = c(4,4),
@@ -14,6 +19,8 @@ par(mfrow = c(4,4),
 
 sp_list <- colnames(estonia_sub)[20:35]
 
+
+# plot the prevalences and the distribution of coverages for each species
 prevalences <- round(100*colMeans(estonia_sub[,sp_list] > 0),2)
 
 for (sp_name in sp_list) {
@@ -30,6 +37,7 @@ for (sp_name in sp_list) {
 }
 
 ### pairplots for each species
+
 for (i in 20:35) {
   y <- estonia_sub[,i]
   X <- estonia_sub[,c(11:19)]
@@ -37,7 +45,7 @@ for (i in 20:35) {
   sp_name <- gsub(" ","_",sp_name)
   sp_name <- gsub("/","_",sp_name)
   
-  png(paste0("plots/estonia_new/species_against_covariates/",sp_name))
+  png(paste0("plots/training_data/species_against_covariates/",sp_name))
   par(mfrow = c(3,3),
       mar = c(4,4,2,0))
   for(j in 1:ncol(X)) {
@@ -48,13 +56,16 @@ for (i in 20:35) {
 
 ### maps of coverages!!!
 
+# turn the training data into shapefile
 load("data/estonia_new/train_2020_2021.Rdata")
 df_sub <- df_sub[,!(colnames(df_sub) %in% c("Furcellaria lumbricalis loose form","Tolypella nidifica","Chara tomentosa"))]
-
 est.vect <- vect(df_sub, geom = c("x","y"), crs = "EPSG:3067")
+
+# load in the coastline shapefile
 eur.coast <- vect("europe_coastline_shapefile/Europe_coastline_poly.shp")
 eur.coast <- project(eur.coast, "EPSG:3067")
 
+# cut for visualization
 ext_vec <- c(170000,550000,6410000,6640000)
 eur.coast <- crop(eur.coast,ext_vec)
 
