@@ -53,22 +53,22 @@ grid_raster <- rast(ext_vec_grid,ncols=ncols,nrows=nrows, crs = "EPSG:3067")
 
 # erase the land areas
 grid_vector <- as.polygons(grid_raster)
-cropped_grid <- erase(grid_vector, europe.vect.cut)
+spatial_grid <- erase(grid_vector, europe.vect.cut)
 
 # plot the grid
 par(mfrow = c(1,1))
-plot(cropped_grid, main = "prediction grid")
+plot(spatial_grid, main = "prediction grid")
 plot(estonia_sub.vect, add = TRUE, col = "red")
 plot(europe.vect.cut, add = TRUE, col = "lightgrey")
 
 # save the spatial random effect grid
-writeVector(cropped_grid, filename = "data/estonia_new/spatial_random_effect_grid.shp")
+writeVector(spatial_grid, filename = "data/estonia_new/spatial_random_effect_grid.shp", overwrite = TRUE)
 
 ### take centre points and create space matrix (s1,s2) with coordinates
 ### put it in the model such that they have a gaussian process
 ### in likelihood part, take spatial errors using PZ type of thing that picks the correct random effect
 
-grid_centers <- centroids(cropped_grid)
+grid_centers <- centroids(spatial_grid)
 grid_centers.df <- as.data.frame(grid_centers, geom = "XY")
 
 dim(grid_centers.df) # there are m = 182 grid cells
@@ -99,10 +99,11 @@ X.scaled <- scale_covariates(X)
 ### add the second order terms
 X.sec_ord <- add_second_order_terms(X.scaled,colnames(X.scaled))
 
-### Amphibalanus
+### Amphibalanus & Chara Aspera
 
 amphi <- estonia_sub[,"Amphibalanus improvisus"]
 amphi.01 <- amphi/100 # beta regression takes values from [0,1]
+
 
 loo_amphi.spat <- c()
 
@@ -120,7 +121,18 @@ amphi_dat.beta_spat <- list(N = nrow(X.sec_ord),
                        a = 1,
                        P = P)
 
+chara_dat.beta_spat <- list(N = nrow(X.sec_ord),
+                            n_var = ncol(X.sec_ord),
+                            n_obs_grid = ncol(P),
+                            y = chara.01,
+                            X = X.sec_ord,
+                            s = observed_grid_cells.df,
+                            a = 1,
+                            P = P)
+
 mod_amphi.beta_spat <- stan("stan_files/left_censored_beta_regression_spatial.stan", data = amphi_dat.beta_spat, chains = 4, iter = 200, seed = 42)
+mod_chara.beta_spat <- stan("stan_files/left_censored_beta_regression_spatial.stan", data = chara_dat.beta_spat, chains = 4, iter = 200, seed = 42)
+
 
 #save loo
 loo_amphi.spat <- c(loo_amphi.spat,loo(mod_amphi.beta_spat)$elpd_loo)
@@ -156,6 +168,7 @@ for (i in 1:n_rep) {
 
 ### plot response curves
 plot_responses_beta_regression(mod_amphi.beta_spat,X.sec_ord,X,TRUE,TRUE,0,60,0,1,3,4,1,"expectation")
+plot_responses_beta_regression(mod_chara.beta_spat,X.sec_ord,X,TRUE,TRUE,0,60,0,1,3,4,1,"expectation")
 
 ### plot prob of zero
 plot_responses_beta_regression(mod_amphi.beta_spat,X.sec_ord,X,TRUE,TRUE,0,60,0,1,3,4,1,"probzero")
@@ -166,7 +179,7 @@ average_distribution_beta_regression(mod_amphi.beta_spat,1,"amphi")
 ### plot the spatial random effects!
 s_obs <- observed_grid_cells.df
 s_pred <- grid_centers.df[,c("x","y")]/1000 #as kilometers
-grid.vect <- cropped_grid
+grid.vect <- spatial_grid
 shoreline.vect <- europe.vect.cut
 obs.vect <- estonia_sub.vect
 
@@ -240,7 +253,7 @@ plot_separate_responses_ZI_beta_regression(mod_amphi.ZIBeta_spat,X.sec_ord,X,TRU
 
 s_obs <- observed_grid_cells.df
 s_pred <- grid_centers.df[,c("x","y")]/1000 #as kilometers
-grid.vect <- cropped_grid
+grid.vect <- spatial_grid
 shoreline.vect <- europe.vect.cut
 obs.vect <- estonia_sub.vect
 

@@ -13,10 +13,12 @@ library(rstan)
 options(mc.cores = parallel::detectCores())
 rstan_options(auto_write = TRUE)
 
+# load in helper functions
+source("codes/helpers.R")
+
 # load in the training data
 #load("data/estonia_sub/estonia_sub_df.RData")
 load("data/estonia_new/train_2020_2021.Rdata")
-source("codes/helpers.R")
 
 estonia_sub <- df_sub
 
@@ -126,6 +128,8 @@ plot_responses_beta_regression(mod_amphi.beta,X.sec_ord,X,TRUE,TRUE,0,60,0,1,3,4
 
 ### plot distribution of y in average conditions (X = 0)
 average_distribution_beta_regression(mod_amphi.beta,1,"amphi")
+
+### try new predict function
 
 # 3) ZI-Beta Regression
 
