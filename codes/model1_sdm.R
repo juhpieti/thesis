@@ -23,7 +23,7 @@ res_loo <- c()
 
 X <- estonia_sub[,11:19]
 ### scale the covariates
-
+X.scaled <- scale_covariates(X)
 
 ### add depth to secchi ratio
 X_new <- X
@@ -89,15 +89,16 @@ X.sec_ord.new <- add_second_order_terms(X.scaled.new,colnames(X.scaled.new))
 X.sec_ord.new2 <- add_second_order_terms(X.scaled.new2,colnames(X.scaled.new2))
 
 res_loo <- c()
-
-for (sp_name in colnames(estonia_sub)[20:35]) {
+### 20-35
+### fo first 20-24
+for (sp_name in colnames(estonia_sub)[20:24]) {
   y <- estonia_sub[,sp_name]
   y.bin <- as.numeric(y > 0)
   
   ### fit the model
-  mod1 <- fit_logistic_regression(y.bin,X.sec_ord,4,250,FALSE)
-  mod2 <- fit_logistic_regression(y.bin,X.sec_ord.new,4,250,FALSE)
-  mod3 <- fit_logistic_regression(y.bin,X.sec_ord.new2,4,250,FALSE)
+  mod1 <- fit_logistic_regression(y.bin,X.sec_ord,3,300,FALSE)
+  mod2 <- fit_logistic_regression(y.bin,X.sec_ord.new,3,300,FALSE)
+  mod3 <- fit_logistic_regression(y.bin,X.sec_ord.new2,3,300,FALSE)
   #mod.iid <- fit_logistic_regression(y.bin,X.sec_ord,4,1000,TRUE)
   
   ### check convergence
@@ -140,7 +141,7 @@ for (sp_name in colnames(estonia_sub)[20:35]) {
   
   
   png(paste0("plots/SDM/M1/log_reg_sec_ord/with_light_level/",sp_name_modified,".png"))
-  plot_responses(mod3,X.sec_ord.new2,X_new,TRUE,TRUE,0,50,0,1,3,4)
+  plot_responses(mod3,X.sec_ord.new2,X_new2,TRUE,TRUE,0,50,0,1,3,4)
   dev.off()
   
   # png(paste0("plots/SDM/M1/log_reg_sec_ord_noise/new_covariate_responses_restricted/",sp_name_modified,".png"))

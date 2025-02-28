@@ -11,58 +11,81 @@ data {
 }
 
 parameters {
-  vector[n_var] beta;
-  // vector[n_var] beta_phi; // coefficients for phi parameter
+  vector[n_var/2] beta_1;
+  //vector<upper=0>[n_var/2] beta_2;
+  vector[n_var/2] logneg_beta_2; // theta = log(-B) <=> B = -exp(theta)
   real alpha;
-  // real alpha_phi; 
   real<lower=0> rho; // scale parameter for beta distribution
-  //real alpha_phi;
-  // real<lower=0> a; // zero-point parameter
-  // vector<lower=0,upper=1>[N] V; // latent beta-distributed variables
   real<lower=0> l; // length-scale parameter
   real<lower=0> s2_cf; // magnitude of the covariance function
-  vector[n_obs_grid] z; // N(0,1) for creating the random effects
+  //vector[n_obs_grid] z; // N(0,1) for creating the random effects
+  vector[n_obs_grid] phi; // spatial effects modeled excplicitely
 }
 
 transformed parameters {
-  vector[n_obs_grid] phi; // random effects
-  {
-    matrix[n_obs_grid,n_obs_grid] K; // covariance matrix
-    matrix[n_obs_grid,n_obs_grid] L; // Cholesky of covariance matrix
-    
-    // construct K
-    for (i in 1:n_obs_grid) {
-      for (j in i:n_obs_grid) {
-        K[i,j] = s2_cf*exp(-(distance(s[i],s[j]))/l);
-        K[j,i] = s2_cf*exp(-(distance(s[i],s[j]))/l);
-      }
-    }
-    // generate the random effects
-    L = cholesky_decompose(K);
-    phi = L*z; // follows N(0,K)
-  }
+  // vector[n_obs_grid] phi;// random effects
+  // {
+  //   matrix[n_obs_grid,n_obs_grid] K; // covariance matrix
+  //   matrix[n_obs_grid,n_obs_grid] L; // Cholesky of covariance matrix
+  // 
+  //   // construct K
+  //   for (i in 1:n_obs_grid) {
+  //     for (j in i:n_obs_grid) {
+  //       K[i,j] = s2_cf*exp(-(distance(s[i],s[j]))/l);
+  //       K[j,i] = s2_cf*exp(-(distance(s[i],s[j]))/l);
+  //     }
+  //   }
+  // 
+  //   // generate the random effects
+  //   L = cholesky_decompose(K);
+  //   phi = L*z; // follows N(0,K)
+  // }
+  
+  // model mu to clarify the code
+  vector[N] mu;
+  mu = inv_logit(alpha + X * append_row(beta_1,-exp(logneg_beta_2)) + P*phi);
 }
 
 model {
+  // spatial random effect
+  matrix[n_obs_grid,n_obs_grid] K; // covariance matrix
+  //matrix[n_obs_grid,n_obs_grid] L; // Cholesky of covariance matrix
+
+  // construct K that depends on s2, l
+  for (i in 1:n_obs_grid) {
+    for (j in i:n_obs_grid) {
+      K[i,j] = s2_cf*exp(-(distance(s[i],s[j]))/l);
+      K[j,i] = s2_cf*exp(-(distance(s[i],s[j]))/l);
+    }
+  }
+  
+  //K = K + diag_matrix(rep_vector(1e-08,n_obs_grid)); // add jitter for stability
+  //L = cholesky_decompose(K);
+  //phi ~ multi_normal_cholesky(rep_vector(0,n_obs_grid),L); //GP(0,K)
+  phi ~ multi_normal(rep_vector(0,n_obs_grid),K); //GP(0,K)
+  
   // priors for coefficients
-  beta ~ multi_normal(rep_vector(0,n_var),diag_matrix(rep_vector(sqrt(2),n_var))); // ORIGINAL
+  // beta_1 ~ multi_normal(rep_vector(0,n_var/2),diag_matrix(rep_vector(sqrt(2),n_var/2)));
+  // beta_2 ~ multi_normal(rep_vector(0,n_var/2),diag_matrix(rep_vector(sqrt(2),n_var/2)));
+  beta_1 ~ normal(0,sqrt(2));
+  logneg_beta_2 ~ normal(0,1);
   alpha ~ normal(0,sqrt(2)); // ORIGINAL
-  rho ~ inv_gamma(1,1);
-  //alpha_phi ~ normal(0,1);
-  //beta_phi ~ normal(0,1);
+  //rho ~ inv_gamma(0.1,0.1);
+  rho ~ cauchy(0,sqrt(5));
   
-  z ~ normal(0,1);
-  s2_cf ~ inv_gamma(0.25,0.25);
-  l ~ inv_gamma(1,1);
+  //z ~ normal(0,1);
+  // priors for covariance function
+  //s2_cf ~ inv_gamma(0.01,0.01);
+  s2_cf ~ cauchy(0,sqrt(0.01));
+  //s2_cf ~ inv_gamma(2,1);
+  //l ~ inv_gamma(1,1);
+  l ~ cauchy(0,sqrt(50));
   
-  // likelihood
   for (i in 1:N) {
     // calculate the mean parameter
     real mu_i;
-    mu_i = inv_logit(alpha + X[i,] * beta + P[i,]*phi);
-    mu_i = fmin(fmax(mu_i,1e-08), 1 - 1e-08);
-    //real phi;
-    //phi = exp(alpha_phi + X[i,] * beta_phi)+1e-08;
+    mu_i = mu[i];
+    mu_i = fmin(fmax(mu_i,1e-08), 1 - 1e-08); // prevent exactly 0 or exactly 1
     if (y[i] == 0) {
       target += beta_lcdf(a/(a+1) | mu_i*rho, (1-mu_i)*rho);
       // target += beta_proportion_lcdf(a/(a+1) | mu_i, phi);
@@ -78,15 +101,20 @@ model {
 }
 
 generated quantities {
+  // return beta_2 in constrained space
+  vector[n_var/2] beta_2;
+  beta_2 = -exp(logneg_beta_2);
+  
+  // calculate log-likelihoods for loo package
   vector[N] log_lik;
+  
   for (i in 1:N) {
     // calculate the mean parameter
     real mu_i;
-    mu_i = inv_logit(alpha + X[i,] * beta + P[i,]*phi);
+    //mu_i = inv_logit(alpha + X[i,1:(n_var/2)] * beta_1 + X[i,(1+n_var/2):n_var] *  beta_2 + P[i,]*phi);
+    mu_i = mu[i];
     mu_i = fmin(fmax(mu_i,1e-08), 1 - 1e-08);
     
-    //real phi;
-    //phi = exp(alpha + X[i,] * beta_phi)+1e-08;
     if (y[i] == 0) {
       log_lik[i] = beta_lcdf(a/(a+1) | mu_i*rho, (1-mu_i)*rho);
       // log_lik[i] = beta_proportion_lcdf(a/(a+1) | mu_i, phi);

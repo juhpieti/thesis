@@ -11,11 +11,17 @@ data {
 }
 
 parameters {
-  // regression coefficients
-  vector[n_var] beta;
-  vector[n_var] beta_pi; // coefficients for probability of suitability
+  // coefficients for beta distribution mean
+  vector[n_var/2] beta_1; // first order coefficients
+  vector[n_var/2] logneg_beta_2; // second order coefficients
+  
+  // coefficients for probability of suitability
+  vector[n_var/2] beta_pi_1;
+  vector[n_var/2] logneg_beta_pi_2; 
+  
+  // intercepts
   real alpha;
-  real alpha_pi; // intercept for probability of suitability
+  real alpha_pi;
   
   // scale parameter for Beta distribution
   real<lower=0> rho; // scale parameter for beta distribution
@@ -27,63 +33,112 @@ parameters {
   real<lower=0> l_pi; // length-scale parameter
   real<lower=0> s2_pi; // magnitude of the covariance function
   
-  vector[n_obs_grid] z; // N(0,1) for creating the random effects
+  //vector[n_obs_grid] z; // N(0,1) for creating the random effects
+  vector[n_obs_grid] phi_mu; // spatial random effects
+  vector[n_obs_grid] phi_pi; //
 }
 
 transformed parameters {
-  vector[n_obs_grid] phi_mu; // random effects
-  vector[n_obs_grid] phi_pi;
-  {
-    matrix[n_obs_grid,n_obs_grid] K_mu; // covariance matrix
-    matrix[n_obs_grid,n_obs_grid] K_pi;
-    matrix[n_obs_grid,n_obs_grid] L_mu; // Cholesky of covariance matrix
-    matrix[n_obs_grid,n_obs_grid] L_pi;
+  // vector[n_obs_grid] phi_mu; // random effects
+  // vector[n_obs_grid] phi_pi;
+  // {
+  //   matrix[n_obs_grid,n_obs_grid] K_mu; // covariance matrix
+  //   matrix[n_obs_grid,n_obs_grid] K_pi;
+  //   matrix[n_obs_grid,n_obs_grid] L_mu; // Cholesky of covariance matrix
+  //   matrix[n_obs_grid,n_obs_grid] L_pi;
+  //   
+  //   // construct K
+  //   for (i in 1:n_obs_grid) {
+  //     for (j in i:n_obs_grid) {
+  //       K_mu[i,j] = s2_mu*exp(-(distance(s[i],s[j]))/l_mu);
+  //       K_mu[j,i] = s2_mu*exp(-(distance(s[i],s[j]))/l_mu);
+  //       
+  //       K_pi[i,j] = s2_pi*exp(-(distance(s[i],s[j]))/l_pi);
+  //       K_pi[j,i] = s2_pi*exp(-(distance(s[i],s[j]))/l_pi);
+  //     }
+  //   }
+  //   
+  //   // generate the random effects
+  //   L_mu = cholesky_decompose(K_mu);
+  //   phi_mu = L_mu*z; // follows N(0,K)
+  //   
+  //   L_pi = cholesky_decompose(K_pi);
+  //   phi_pi = L_pi*z;
+  // }
     
-    // construct K
-    for (i in 1:n_obs_grid) {
-      for (j in i:n_obs_grid) {
-        K_mu[i,j] = s2_mu*exp(-(distance(s[i],s[j]))/l_mu);
-        K_mu[j,i] = s2_mu*exp(-(distance(s[i],s[j]))/l_mu);
-        
-        K_pi[i,j] = s2_pi*exp(-(distance(s[i],s[j]))/l_pi);
-        K_pi[j,i] = s2_pi*exp(-(distance(s[i],s[j]))/l_pi);
-      }
-    }
-    
-    // generate the random effects
-    L_mu = cholesky_decompose(K_mu);
-    phi_mu = L_mu*z; // follows N(0,K)
-    
-    L_pi = cholesky_decompose(K_pi);
-    phi_pi = L_pi*z;
-  }
+  // mean for beta distribution
+  vector[N] mu;
+  mu = inv_logit(alpha + X*append_row(beta_1,-exp(logneg_beta_2)) + P*phi_mu);
+  // probability of suitability
+  vector[N] prob_suit;
+  prob_suit = inv_logit(alpha_pi + X*append_row(beta_pi_1,-exp(logneg_beta_pi_2)) + P*phi_pi);
 }
 
 model {
+  // construct K matrices
+  matrix[n_obs_grid,n_obs_grid] K_mu; // covariance matrix
+  matrix[n_obs_grid,n_obs_grid] K_pi;
+  //matrix[n_obs_grid,n_obs_grid] L_mu; // Cholesky of covariance matrix
+  //matrix[n_obs_grid,n_obs_grid] L_pi;
+
+  // construct K
+  for (i in 1:n_obs_grid) {
+    for (j in i:n_obs_grid) {
+      K_mu[i,j] = s2_mu*exp(-(distance(s[i],s[j]))/l_mu);
+      K_mu[j,i] = s2_mu*exp(-(distance(s[i],s[j]))/l_mu);
+
+      K_pi[i,j] = s2_pi*exp(-(distance(s[i],s[j]))/l_pi);
+      K_pi[j,i] = s2_pi*exp(-(distance(s[i],s[j]))/l_pi);
+    }
+  }
+  
+  // K_mu = K_mu + diag_matrix(rep_vector(1e-08,n_obs_grid));
+  // K_pi = K_pi + diag_matrix(rep_vector(1e-08,n_obs_grid));
+  // 
+  // L_mu = cholesky_decompose(K_mu);
+  // L_pi = cholesky_decompose(K_pi);
+
+  phi_mu ~ multi_normal(rep_vector(0,n_obs_grid),K_mu); //GP(0,K)
+  //phi_mu ~ multi_normal_cholesky(rep_vector(0,n_obs_grid),L_mu);
+  phi_pi ~ multi_normal(rep_vector(0,n_obs_grid),K_pi); 
+  //phi_pi ~ multi_normal_cholesky(rep_vector(0,n_obs_grid),L_pi);
+
   // priors for coefficients
-  beta ~ multi_normal(rep_vector(0,n_var),diag_matrix(rep_vector(sqrt(2),n_var))); // ORIGINAL
-  beta_pi ~ multi_normal(rep_vector(0,n_var),diag_matrix(rep_vector(sqrt(2),n_var)));
+  beta_1 ~ normal(0,sqrt(2));
+  logneg_beta_2 ~ normal(0,1);
+  beta_pi_1 ~ normal(0,sqrt(2));
+  logneg_beta_pi_2 ~ normal(0,1);
+  
   alpha ~ normal(0,sqrt(2)); // ORIGINAL
   alpha_pi ~ normal(0,sqrt(2));
-  rho ~ inv_gamma(1,1);
+  //rho ~ inv_gamma(0.1,0.1);
+  rho ~ cauchy(0,sqrt(5));
   
-  z ~ normal(0,1);
+  //z ~ normal(0,1);
   
-  s2_mu ~ inv_gamma(0.25,0.25);
-  s2_pi ~ inv_gamma(0.25,0.25);
-  l_mu ~ inv_gamma(1,1);
-  l_pi ~ inv_gamma(1,1);
+  // s2_mu ~ inv_gamma(0.01,0.01);
+  // s2_pi ~ inv_gamma(0.01,0.01);
+  // l_mu ~ inv_gamma(1,1);
+  // l_pi ~ inv_gamma(1,1);
+  //s2_mu ~ cauchy(0,sqrt(0.1));
+  //s2_pi ~ cauchy(0,sqrt(0.1));
+  s2_mu ~ inv_gamma(2,1);
+  s2_pi ~ inv_gamma(2,1);
+  l_mu ~ cauchy(0,sqrt(20));
+  l_pi ~ cauchy(0,sqrt(20));
   
   // likelihood
   for (i in 1:N) {
     // calculate the mean parameter for beta distribution
     real mu_i;
-    mu_i = inv_logit(alpha + X[i,] * beta + P[i,]*phi_mu);
+    mu_i = mu[i];
+    //mu_i = inv_logit(alpha + X[i,] * beta + P[i,]*phi_mu);
     mu_i = fmin(fmax(mu_i,1e-08), 1 - 1e-08); // there was problems of getting exact 0/1 with beta distribution calls
     // calculate the probability of suitability
     
     real pi_i;
-    pi_i = inv_logit(alpha_pi + X[i,] * beta_pi + P[i,]*phi_pi);
+    pi_i = prob_suit[i];
+    //pi_i = inv_logit(alpha_pi + X[i,] * beta_pi + P[i,]*phi_pi);
     pi_i = fmin(fmax(pi_i,1e-08), 1 - 1e-08);
     
     // likelihood terms
@@ -103,16 +158,27 @@ model {
 
 
 generated quantities {
+   // return beta_2 and beta_pi_2 in restricted spae
+  vector[n_var/2] beta_2;
+  beta_2 = -exp(logneg_beta_2);
+  
+  vector[n_var/2] beta_pi_2;
+  beta_pi_2 = -exp(logneg_beta_pi_2);
+  
+  
+  // calculate log-likelihood
   vector[N] log_lik;
   for (i in 1:N) {
     // calculate the mean parameter
     real mu_i;
-    mu_i = inv_logit(alpha + X[i,] * beta + P[i,]*phi_mu);
+    mu_i = mu[i];
+    //mu_i = inv_logit(alpha + X[i,] * beta + P[i,]*phi_mu);
     mu_i = fmin(fmax(mu_i,1e-08), 1 - 1e-08);
     
     // calculate the probability of suitability
     real pi_i;
-    pi_i = inv_logit(alpha_pi + X[i,] * beta_pi + P[i,]*phi_pi);
+    pi_i = prob_suit[i];
+    //pi_i = inv_logit(alpha_pi + X[i,] * beta_pi + P[i,]*phi_pi);
     pi_i = fmin(fmax(pi_i,1e-08), 1 - 1e-08);
     
     // likelihood terms
