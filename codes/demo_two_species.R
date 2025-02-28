@@ -88,7 +88,10 @@ amphi_dat.beta <- list(N = nrow(X.sec_ord),
                  X = X.sec_ord,
                  a = 1)
 
-mod_amphi.beta <- stan("stan_files/left_censored_beta_regression.stan", data = amphi_dat.beta, chains = 4, iter = 250, seed = 42)
+mod_amphi.beta <- stan("stan_files/left_censored_beta_regression.stan", data = amphi_dat.beta, chains = 4, iter = 250, seed = 42,
+                       pars = c("mu","logneg_beta_2"), include = FALSE)
+saveRDS(mod_amphi.beta, "models/demo/M1/amphi.rds")
+
 
 # save loo value
 loo_amphi <- c(loo_amphi,loo(mod_amphi.beta)$elpd_loo)
@@ -101,7 +104,7 @@ hist(amphi.01, breaks = 10, xlim = c(0,1), main = "obs", ylim = c(0,500))
 
 
 alpha.sam <- as.matrix(mod_amphi.beta, pars = c("alpha"))
-beta.sam <- as.matrix(mod_amphi.beta, pars = c("beta"))
+beta.sam <- as.matrix(mod_amphi.beta, pars = c("beta_1","beta_2"))
 rho.sam <- as.matrix(mod_amphi.beta, pars = c("rho"))
 
 a <- 1
@@ -133,7 +136,10 @@ average_distribution_beta_regression(mod_amphi.beta,1,"amphi")
 
 # 3) ZI-Beta Regression
 
-mod_amphi_ZIbeta <- stan("stan_files/zero_inflated_left_censored_beta_regression.stan",data = amphi_dat.beta, chains = 4, iter = 250, seed = 42)
+mod_amphi_ZIbeta <- stan("stan_files/zero_inflated_left_censored_beta_regression.stan",data = amphi_dat.beta, chains = 4, iter = 200, seed = 42,
+                         pars = c("mu","prob_suit","logneg_beta_2","logneg_beta_pi_2"), include = FALSE)
+saveRDS(mod_amphi_ZIbeta, "models/demo/M2/amphi.rds")
+
 
 #save loo
 loo_amphi <- c(loo_amphi,loo(mod_amphi_ZIbeta)$elpd_loo)
@@ -145,10 +151,10 @@ par(mfrow = c(4,4),
 hist(amphi.01, breaks = 10, xlim = c(0,1), main = "obs", ylim = c(0,500))
 
 alpha.sam <- as.matrix(mod_amphi_ZIbeta, pars = c("alpha"))
-beta.sam <- as.matrix(mod_amphi_ZIbeta, pars = c("beta"))
+beta.sam <- as.matrix(mod_amphi_ZIbeta, pars = c("beta_1","beta_2"))
 rho.sam <- as.matrix(mod_amphi_ZIbeta, pars = c("rho"))
 alpha_pi.sam <- as.matrix(mod_amphi_ZIbeta, pars = c("alpha_pi"))
-beta_pi.sam <- as.matrix(mod_amphi_ZIbeta, pars = c("beta_pi"))
+beta_pi.sam <- as.matrix(mod_amphi_ZIbeta, pars = c("beta_pi_1","beta_pi_2"))
 
 a <- 1
 
@@ -260,7 +266,9 @@ chara_dat.beta <- list(N = nrow(X.sec_ord),
                        X = X.sec_ord,
                        a = 1)
 
-mod_chara.beta <- stan("stan_files/left_censored_beta_regression.stan", data = chara_dat.beta, chains = 4, iter = 250, seed = 42)
+mod_chara.beta <- stan("stan_files/left_censored_beta_regression.stan", data = chara_dat.beta, chains = 4, iter = 200, seed = 42,
+                       pars = c("mu","logneg_beta_2"), include = FALSE)
+saveRDS(mod_chara.beta, "models/demo/M1/chara.rds")
 
 # save LOO values
 loo_chara <- c(loo_chara,loo(mod_chara.beta)$elpd_loo)
@@ -272,8 +280,8 @@ par(mfrow = c(4,4),
 hist(chara.01, breaks = 10, xlim = c(0,1), main = "obs", ylim = c(0,500))
 
 alpha.sam <- as.matrix(mod_chara.beta, pars = c("alpha"))
-beta.sam <- as.matrix(mod_chara.beta, pars = c("beta"))
-phi.sam <- as.matrix(mod_chara.beta, pars = c("phi"))
+beta.sam <- as.matrix(mod_chara.beta, pars = c("beta_1","beta_2"))
+rho.sam <- as.matrix(mod_chara.beta, pars = c("rho"))
 
 a <- 1
 
@@ -285,8 +293,8 @@ for (i in 1:n_rep) {
   y_rep <- c()
   for (j in 1:nrow(X.sec_ord)) {
     mu_i <- inv_logit(alpha.sam[idx,] + as.numeric(X.sec_ord[j, ]) %*% beta.sam[idx,])
-    phi_i <- phi.sam[idx,]
-    V_i <- rbeta(1,mu_i*phi_i,(1-mu_i)*phi_i)
+    rho_i <- rho.sam[idx,]
+    V_i <- rbeta(1,mu_i*rho_i,(1-mu_i)*rho_i)
     y_rep_i <- max(0,(a+1)*V_i - a)
     y_rep <- c(y_rep, y_rep_i)
   }

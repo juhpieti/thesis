@@ -23,8 +23,18 @@ res_loo <- c()
 
 X <- estonia_sub[,11:19]
 ### scale the covariates
-X.scaled <- scale_covariates(X)
 
+
+### add depth to secchi ratio
+X_new <- X
+X_new$depth_to_secchi <- X$depth / X$zsd
+X.scaled.new <- scale_covariates(X_new)
+
+
+### add exp(-depth/secchi)
+X_new2 <- X
+X_new2$light_level <- exp(-X_new2$depth/X_new2$zsd)
+X.scaled.new2 <- scale_covariates(X_new2)
 
 for (sp_name in colnames(estonia_sub)[20:35]) {
   y <- estonia_sub[,sp_name]
@@ -75,54 +85,67 @@ for (sp_name in colnames(estonia_sub)[20:35]) {
 
 ### add second order terms
 X.sec_ord <- add_second_order_terms(X.scaled,colnames(X.scaled))
-#X.sec_ord <- add_interactions(X.sec_ord,"depth","zsd")
-res_loo.secord <- c()
-coeff_mat_list <- list()
+X.sec_ord.new <- add_second_order_terms(X.scaled.new,colnames(X.scaled.new))
+X.sec_ord.new2 <- add_second_order_terms(X.scaled.new2,colnames(X.scaled.new2))
+
+res_loo <- c()
 
 for (sp_name in colnames(estonia_sub)[20:35]) {
   y <- estonia_sub[,sp_name]
   y.bin <- as.numeric(y > 0)
   
   ### fit the model
-  mod <- fit_logistic_regression(y.bin,X.sec_ord,4,1000,FALSE)
-  mod.iid <- fit_logistic_regression(y.bin,X.sec_ord,4,1000,TRUE)
+  mod1 <- fit_logistic_regression(y.bin,X.sec_ord,4,250,FALSE)
+  mod2 <- fit_logistic_regression(y.bin,X.sec_ord.new,4,250,FALSE)
+  mod3 <- fit_logistic_regression(y.bin,X.sec_ord.new2,4,250,FALSE)
+  #mod.iid <- fit_logistic_regression(y.bin,X.sec_ord,4,1000,TRUE)
   
   ### check convergence
-  check_convergence(mod,FALSE)
-  check_convergence(mod.iid,TRUE)
+  #check_convergence(mod,FALSE)
+  #check_convergence(mod.iid,TRUE)
   
   ### calculate loo
-  mod.loo <- calc_loo(mod)
-  mod.iid.loo <- calc_loo(mod.iid)
+  mod1.loo <- calc_loo(mod1)
+  mod2.loo <- calc_loo(mod2)
+  mod3.loo <- calc_loo(mod3)
   # save to a table
-  res_loo.secord <- rbind(res_loo.secord, c(mod.loo,mod.iid.loo))
+  res_loo<- rbind(res_loo, c(mod1.loo,mod2.loo,mod3.loo))
   
   ### examine the coefficient distributions
   sp_name_modified <- gsub(" ","_",sp_name)
   sp_name_modified <- gsub("/","_",sp_name_modified)
   
-  png(paste0("plots/SDM/M1/log_reg_sec_ord/new_covariate_distributions/",sp_name_modified,".png"))
-  plot_distributions(mod,X.sec_ord,FALSE,5,5)
-  dev.off()
+  # png(paste0("plots/SDM/M1/log_reg_sec_ord/new_covariate_distributions/",sp_name_modified,".png"))
+  # plot_distributions(mod,X.sec_ord,FALSE,5,5)
+  # dev.off()
   
-  png(paste0("plots/SDM/M1/log_reg_sec_ord_noise/new_covariate_distributions/",sp_name_modified,".png"))
-  plot_distributions(mod.iid,X.sec_ord,TRUE,5,5)
-  dev.off()
+  # png(paste0("plots/SDM/M1/log_reg_sec_ord_noise/new_covariate_distributions/",sp_name_modified,".png"))
+  # plot_distributions(mod.iid,X.sec_ord,TRUE,5,5)
+  # dev.off()
   
-  ### save the coefficients
-  coeff_mat <- c()
-  coeff_mat <- cbind(coeff_mat, c(get_posterior_mean(mod, pars = c("alpha","beta"))[,5], s2=0))
-  coeff_mat <- cbind(coeff_mat, c(get_posterior_mean(mod.iid, pars = c("alpha","beta","s2"))))
-  coeff_mat_list[[sp_name]] <- coeff_mat
+  # ### save the coefficients
+  # coeff_mat <- c()
+  # coeff_mat <- cbind(coeff_mat, c(get_posterior_mean(mod, pars = c("alpha","beta"))[,5], s2=0))
+  # coeff_mat <- cbind(coeff_mat, c(get_posterior_mean(mod.iid, pars = c("alpha","beta","s2"))))
+  # coeff_mat_list[[sp_name]] <- coeff_mat
   
   ### examine the responses
-  png(paste0("plots/SDM/M1/log_reg_sec_ord/new_covariate_responses/",sp_name_modified,".png"))
-  plot_responses(mod,X.sec_ord,X,TRUE,TRUE,0,50,0,1,3,4)
+  png(paste0("plots/SDM/M1/log_reg_sec_ord/without_extra_covariate_for_depth_secchi/",sp_name_modified,".png"))
+  plot_responses(mod1,X.sec_ord,X,TRUE,TRUE,0,50,0,1,3,4)
   dev.off()
   
-  png(paste0("plots/SDM/M1/log_reg_sec_ord_noise/new_covariate_responses/",sp_name_modified,".png"))
-  plot_responses(mod.iid,X.sec_ord,X,TRUE,TRUE,0,50,0,1,3,4)
+  png(paste0("plots/SDM/M1/log_reg_sec_ord/with_depth_to_secchi/",sp_name_modified,".png"))
+  plot_responses(mod2,X.sec_ord.new,X_new,TRUE,TRUE,0,50,0,1,3,4)
   dev.off()
+  
+  
+  png(paste0("plots/SDM/M1/log_reg_sec_ord/with_light_level/",sp_name_modified,".png"))
+  plot_responses(mod3,X.sec_ord.new2,X_new,TRUE,TRUE,0,50,0,1,3,4)
+  dev.off()
+  
+  # png(paste0("plots/SDM/M1/log_reg_sec_ord_noise/new_covariate_responses_restricted/",sp_name_modified,".png"))
+  # plot_responses(mod.iid,X.sec_ord,X,TRUE,TRUE,0,50,0,1,3,4)
+  # dev.off()
 }
 
 

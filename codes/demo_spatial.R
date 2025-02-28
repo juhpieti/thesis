@@ -40,38 +40,42 @@ plot(estonia_sub.vect, cex = 1, col = "red", main = "observations")
 plot(europe.vect.cut, add = TRUE, col = "lightgrey")
 plot(estonia_sub.vect, cex = 1, col = "red", main = "observations", add = TRUE)
 
-### for spatial random effect we want an even grid to the area except the coast
-# parameters of the grid
-#ext_vec_grid <- ext(c(120000,560000,6300000,6640000))
-ext_vec_grid <- ext(c(140000,560000,6320000,6640000))
-length_grid_cell <- 20000 #20km x 20km grid
-ncols <- ( ext_vec_grid[2] - ext_vec_grid[1] ) / length_grid_cell
-nrows <- ( ext_vec_grid[4] - ext_vec_grid[3] ) / length_grid_cell
-
-grid_raster <- rast(ext_vec_grid,ncols=ncols,nrows=nrows, crs = "EPSG:3067")
-#values(grid_raster) <- sample(1:ncell(grid_raster))
-
-# erase the land areas
-grid_vector <- as.polygons(grid_raster)
-spatial_grid <- erase(grid_vector, europe.vect.cut)
-
-# plot the grid
-par(mfrow = c(1,1))
-plot(spatial_grid, main = "prediction grid")
-plot(estonia_sub.vect, add = TRUE, col = "red")
-plot(europe.vect.cut, add = TRUE, col = "lightgrey")
-
-# save the spatial random effect grid
-writeVector(spatial_grid, filename = "data/estonia_new/spatial_random_effect_grid.shp", overwrite = TRUE)
+# ### for spatial random effect we want an even grid to the area except the coast
+# # parameters of the grid
+# #ext_vec_grid <- ext(c(120000,560000,6300000,6640000))
+# ext_vec_grid <- ext(c(140000,560000,6320000,6640000))
+# length_grid_cell <- 20000 #20km x 20km grid
+# ncols <- ( ext_vec_grid[2] - ext_vec_grid[1] ) / length_grid_cell
+# nrows <- ( ext_vec_grid[4] - ext_vec_grid[3] ) / length_grid_cell
+# 
+# grid_raster <- rast(ext_vec_grid,ncols=ncols,nrows=nrows, crs = "EPSG:3067")
+# #values(grid_raster) <- sample(1:ncell(grid_raster))
+# 
+# # erase the land areas
+# grid_vector <- as.polygons(grid_raster)
+# spatial_grid <- erase(grid_vector, europe.vect.cut)
+# 
+# # plot the grid
+# par(mfrow = c(1,1))
+# plot(spatial_grid, main = "prediction grid")
+# plot(estonia_sub.vect, add = TRUE, col = "red")
+# plot(europe.vect.cut, add = TRUE, col = "lightgrey")
+# 
+# # save the spatial random effect grid
+# writeVector(spatial_grid, filename = "data/estonia_new/spatial_random_effect_grid.shp", overwrite = TRUE)
 
 ### take centre points and create space matrix (s1,s2) with coordinates
 ### put it in the model such that they have a gaussian process
 ### in likelihood part, take spatial errors using PZ type of thing that picks the correct random effect
 
+### load in spatial grid
+spatial_grid <- vect("data/estonia_new/spatial_random_effect_grid_20km/spatial_random_effect_grid_20km.shp")
+
 grid_centers <- centroids(spatial_grid)
 grid_centers.df <- as.data.frame(grid_centers, geom = "XY")
+grid_centers.df <- grid_centers.df[,c("x","y")]
 
-dim(grid_centers.df) # there are m = 182 grid cells
+dim(grid_centers.df) # there are m = 191 grid cells
 
 ### create a P matrix (nxm) matrix that tells to which grid cell each observation belongs to
 nearest_grid_center <- nearest(estonia_sub.vect, grid_centers)
@@ -104,6 +108,9 @@ X.sec_ord <- add_second_order_terms(X.scaled,colnames(X.scaled))
 amphi <- estonia_sub[,"Amphibalanus improvisus"]
 amphi.01 <- amphi/100 # beta regression takes values from [0,1]
 
+chara <- estonia_sub[,"Chara aspera"]
+chara.01 <- chara/100
+
 
 loo_amphi.spat <- c()
 
@@ -121,17 +128,15 @@ amphi_dat.beta_spat <- list(N = nrow(X.sec_ord),
                        a = 1,
                        P = P)
 
-chara_dat.beta_spat <- list(N = nrow(X.sec_ord),
-                            n_var = ncol(X.sec_ord),
-                            n_obs_grid = ncol(P),
-                            y = chara.01,
-                            X = X.sec_ord,
-                            s = observed_grid_cells.df,
-                            a = 1,
-                            P = P)
 
-mod_amphi.beta_spat <- stan("stan_files/left_censored_beta_regression_spatial.stan", data = amphi_dat.beta_spat, chains = 4, iter = 200, seed = 42)
-mod_chara.beta_spat <- stan("stan_files/left_censored_beta_regression_spatial.stan", data = chara_dat.beta_spat, chains = 4, iter = 200, seed = 42)
+
+mod_amphi.beta_spat <- stan("stan_files/left_censored_beta_regression_spatial.stan", data = amphi_dat.beta_spat, chains = 4, iter = 200, seed = 42,
+                            pars = c("mu","logneg_beta_2"), include = FALSE)
+
+
+saveRDS(mod_amphi.beta_spat, "models/demo/M3/amphi.rds")
+saveRDS(mod_chara.beta_spat, "models/demo/M3/chara.rds")
+
 
 
 #save loo
@@ -194,7 +199,14 @@ loo_table
 
 ### Spatial ZI-Beta Regression
 
-mod_amphi.ZIBeta_spat <- stan("stan_files/zero_inflated_left_censored_beta_regression_spatial.stan", data = amphi_dat.beta_spat, chains = 4, iter = 200, seed = 42)
+mod_amphi.ZIBeta_spat <- stan("stan_files/zero_inflated_left_censored_beta_regression_spatial.stan", data = amphi_dat.beta_spat, chains = 4, iter = 200, seed = 42,
+                              pars = c("mu","prob_suit","logneg_beta_2","logneg_beta_pi_2"), include = FALSE)
+saveRDS(mod_amphi.ZIBeta_spat, "models/demo/M4/amphi.rds")
+
+
+mod_chara.ZIBeta_spat <- stan("stan_files/zero_inflated_left_censored_beta_regression_spatial.stan", data = chara_dat.beta_spat, chains = 4, iter = 200, seed = 42,
+                              pars = c("mu","prob_suit","logneg_beta_2","logneg_beta_pi_2"), include = FALSE)
+
 
 loo_amphi.spat <- c(loo_amphi.spat,loo(mod_amphi.ZIBeta_spat)$elpd_loo)
 

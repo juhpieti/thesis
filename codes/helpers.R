@@ -1,7 +1,8 @@
 ### utility functions to be downloaded in different scripts
 
 # load in libraries
-library(rdist)
+library(rdist) #for calculating distance matrices
+library(cubature) #for calculating integrals
 
 exp_covariance <- function(s1,s2,sigma2,l) {
   ### Calculates Covariance matrix using exponential covariance function
@@ -130,7 +131,7 @@ plot_responses <- function(stan_fit, X.train, X.orig, is_standardized = TRUE, se
   # xmax: max depth
   
   alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
-  beta_sam <- as.matrix(stan_fit, pars = c("beta"))
+  beta_sam <- as.matrix(stan_fit, pars = c("beta_1","beta_2"))
   
   ### response curves
   par(mfrow = c(plot_nx,plot_ny))
@@ -318,9 +319,441 @@ plot_responses_binomial_regression <- function(stan_fit, X.train, X.orig, is_sta
   }
 }
 
+
 ####################################################################################################################################
 ################################################ THE USEFUL ONES ###################################################################
 ####################################################################################################################################
+
+integrate_LC_beta <- function(mu,rho,a) {
+  if (mu >= 0.9975) { # integration crashes if lots of mass near 1
+    return(0.9975)
+  } else {
+    calc_density <- function(x) (x*dbeta((x+a)/(a+1),mu*rho,(1-mu)*rho)/(a+1))
+  }
+  return(integrate(calc_density,0,1)$value)
+}
+
+integrate_ZI_LC_beta <- function(mu,pi,rho,a) {
+  if (mu >= 0.995) { # integration crashes if lots of mass near 1
+    return(pi*0.995)
+  } else {
+    calc_density <- function(x) (x*pi*dbeta((x+a)/(a+1),mu*rho,(1-mu)*rho)/(a+1))
+  }
+  return(integrate(calc_density,0,1)$value)
+}
+
+calculate_probzero_LC_beta <- function(mu,rho,a) {
+  return(pbeta(a/(a+1),mu*rho,(1-mu)*rho))
+}
+
+calculate_probzero_ZI_LC_beta <- function(mu,pi,rho,a) {
+  return(1-pi + pi*pbeta(a/(a+1),mu*rho,(1-mu)*rho))
+}
+
+predict_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, a = 1) {
+  ### X.pred: prediction matrix (mxp)
+  ### X.orig: non-scaled data matrix (nxp) to learn about the scaling parameters
+  ### RETURNS rep x m matrix of samples from posterior predictive for latent f
+  
+  # posterior samples
+  alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
+  beta_sam <- as.matrix(stan_fit, pars = c("beta_1","beta_2"))
+  rho_sam <- as.matrix(stan_fit, pars = c("rho"))
+  
+  # prepare prediction matrix
+  X.pred.scaled <- scale_covariates(X.orig,X.pred)
+  Xpred <- add_second_order_terms(X.pred.scaled, colnames(X.pred))
+  Xpred <- as.matrix(Xpred)
+  
+  # initialize matrix for posterior predictive of f_sam
+  f_sam <- c()
+  y_sam <- c()
+  EY_sam <- c()
+  probzero_sam <- c()
+  
+  # loop over posterior samples
+  for (i in seq(1,nrow(beta_sam),thinning)) {
+    alpha_i <- alpha_sam[i,]
+    beta_i <- beta_sam[i,]
+    rho_i <- rho_sam[i,]
+    
+    # latent f
+    f_i <- as.vector(alpha_i + Xpred %*% beta_i)
+    f_sam <- rbind(f_sam,f_i)
+    
+    mu_i <- inv_logit(f_i)
+    
+    # calculate expectations and probability of zeroes
+    
+    ### faster way to accomplish what was done within loop
+    EYi <- sapply(mu_i,integrate_LC_beta,rho=rho_i,a=a)
+    probzero_i <- sapply(mu_i,calculate_probzero_LC_beta,rho=rho_i,a=a)
+
+    #save
+    EY_sam <- rbind(EY_sam,EYi)
+    probzero_sam <- rbind(probzero_sam, probzero_i)
+    
+    #take also predictions from y_tilde
+    V_i <- rbeta(nrow(Xpred),mu_i*rho_i,(1-mu_i)*rho_i)
+    y_i <- sapply(V_i, function(v) (max(0,(a+1)*v - a)))
+    y_sam <- rbind(y_sam, y_i)
+  }
+  
+  # return everything
+  return(list(f_sam = f_sam,
+              y_sam = y_sam,
+              EY_sam = EY_sam,
+              probzero_sam = probzero_sam,
+              rho_sam = rho_sam[seq(1,nrow(beta_sam),thinning), ]))
+}
+
+predict_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, a = 1) {
+  ### X.pred: prediction matrix (mxp)
+  ### X.orig: non-scaled data matrix (nxp) to learn about the scaling parameters
+  ### RETURNS rep x m matrix of samples from posterior predictive for latent f
+  
+  # posterior samples
+  alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
+  alpha_pi_sam <- as.matrix(stan_fit, pars = c("alpha_pi"))
+  beta_sam <- as.matrix(stan_fit, pars = c("beta_1","beta_2"))
+  beta_pi_sam <- as.matrix(stan_fit, pars = c("beta_pi_1","beta_pi_2"))
+  rho_sam <- as.matrix(stan_fit, pars = c("rho"))
+  
+  # prepare prediction matrix
+  X.pred.scaled <- scale_covariates(X.orig,X.pred)
+  Xpred <- add_second_order_terms(X.pred.scaled, colnames(X.pred))
+  Xpred <- as.matrix(Xpred)
+  
+  # initialize matrix for posterior predictive of f_sam
+  f_sam <- c()
+  y_sam <- c()
+  EY_sam <- c()
+  probzero_sam <- c()
+  prob_suit_sam <- c()
+  EY_if_suitable_sam <- c()
+  
+  # loop over posterior samples
+  for (i in seq(1,nrow(beta_sam),thinning)) {
+    alpha_i <- alpha_sam[i,]
+    alpha_pi_i <- alpha_pi_sam[i,]
+    beta_i <- beta_sam[i,]
+    beta_pi_i <- beta_pi_sam[i,]
+    rho_i <- rho_sam[i,]
+    
+    # latent f for mean of beta
+    f_i <- as.vector(alpha_i + Xpred %*% beta_i)
+    f_sam <- rbind(f_sam,f_i)
+    
+    mu_i <- inv_logit(f_i)
+    
+    # latent f for probability of suitability
+    f_pi_i <- as.vector(alpha_pi_i + Xpred %*% beta_pi_i)
+    
+    pi_i <- inv_logit(f_pi_i)
+    prob_suit_sam <- rbind(prob_suit_sam,pi_i)
+    
+    
+    # calculate expectations and probability of zeroes
+
+    ### faster way to accomplish what was done within loop
+    EYi <- mapply(integrate_ZI_LC_beta,mu=mu_i,pi=pi_i, MoreArgs = list(rho=rho_i,a=a))
+    EYi_if_suitable <- sapply(mu_i,integrate_LC_beta,rho=rho_i,a=a)
+    probzero_i <- mapply(calculate_probzero_ZI_LC_beta,mu=mu_i,pi=pi_i, MoreArgs = list(rho=rho_i,a=a))
+    
+    #save
+    EY_sam <- rbind(EY_sam,EYi)
+    EY_if_suitable_sam <- rbind(EY_if_suitable_sam, EYi_if_suitable)
+    probzero_sam <- rbind(probzero_sam, probzero_i)
+    
+    #take also predictions from y_tilde
+    Z_i <- rbinom(nrow(Xpred),1,pi_i) #0/1 vector to tell whether the location is suitable (1 => Y from beta) or unsuitable (0 => Y=0)
+    V_i <- rbeta(nrow(Xpred),mu_i*rho_i,(1-mu_i)*rho_i)
+    y_i <- sapply(V_i, function(v) (max(0,(a+1)*v - a)))
+    y_i <- Z_i*y_i #if the location was unsuitable, set to 0
+    y_sam <- rbind(y_sam, y_i)
+  }
+  
+  # return everything
+  return(list(f_sam = f_sam,
+              y_sam = y_sam,
+              EY_sam = EY_sam,
+              probzero_sam = probzero_sam,
+              prob_suit_sam = prob_suit_sam,
+              EY_if_suitable_sam = EY_if_suitable_sam,
+              rho_sam = rho_sam[seq(1,nrow(beta_sam),thinning), ]))
+}
+
+prepare_P_matrix <- function(pred.locations, grid_center.locations) {
+  # prepare P matrix (m x S) that tells in which spatial block each prediction point belongs to
+  # each rows sums to 1, 1 indicating the block
+  grid_center.vect <- vect(grid_center.locations, geom = c("x","y"), crs = "EPSG:3067")
+  pred_locs.vect <- vect(pred.locations, geom = c("x","y"), crs = "EPSG:3067")
+  nearest_grid_cells.df <- as.data.frame(nearest(pred_locs.vect, grid_center.vect))
+  nearest_id <- nearest_grid_cells.df$to_id #vector telling the ID of the closest grid cell
+  
+  P <- matrix(0, nrow = nrow(pred.locations), ncol = nrow(grid_center.locations))
+  for (i in 1:nrow(pred.locations)) {
+    P[i,nearest_id[i]] <- 1
+  }
+  colnames(P) <- 1:nrow(grid_center.locations)
+  rownames(P) <- 1:nrow(pred.locations)
+  return(P)
+}
+
+predict_spatial_beta_regression <- function(stan_fit, X.pred, X.orig, pred.locations, S.pred, S.obs, thinning = 10, a = 1) {
+  ### X.pred: prediction matrix (mxp)
+  ### X.orig: non-scaled data matrix (nxp) to learn about the scaling parameters
+  # pred.locations: locations for each prediction cell (in meters)
+  # S.pred: locations of coarse spatial grid cells (in kilometers)
+  # S.obs: locations of observed coarse spatial grid cells (in kilometers, WATCH THAT THIS IS THE SAME AS WHEN FITTING A MODEL)
+  ### RETURNS rep x m matrix of samples from posterior predictive for latent f
+  
+  # posterior samples
+  alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
+  beta_sam <- as.matrix(stan_fit, pars = c("beta_1","beta_2"))
+  rho_sam <- as.matrix(stan_fit, pars = c("rho"))
+  phi_sam <- as.matrix(stan_fit, pars = c("phi"))
+  l_sam <- as.matrix(stan_fit, pars = c("l"))
+  s2_sam <- as.matrix(stan_fit, pars = c("s2_cf"))
+  
+  # prepare prediction matrix
+  X.pred.scaled <- scale_covariates(X.orig,X.pred)
+  Xpred <- add_second_order_terms(X.pred.scaled, colnames(X.pred))
+  Xpred <- as.matrix(Xpred)
+  
+  # prepare P matrix (mxS) that tells in which spatial random effect cell each predition point belongs to
+  P <- prepare_P_matrix(pred.locations,S.pred*1000) # turn grid locations to meters
+  
+  # initialize matrix for posterior predictive of f_sam
+  f_sam <- c()
+  phi_pred_sam <- c()
+  y_sam <- c()
+  EY_sam <- c()
+  probzero_sam <- c()
+  
+  # loop over posterior samples
+  for (i in seq(1,nrow(beta_sam),thinning)) {
+    alpha_i <- alpha_sam[i,]
+    beta_i <- beta_sam[i,]
+    rho_i <- rho_sam[i,]
+    
+    # latent f
+    f_i <- as.vector(alpha_i + Xpred %*% beta_i)
+    
+    # sample spatial random effect
+    phi_obs_i <- phi_sam[i,]
+    l_i <- l_sam[i,]
+    s2_i <- s2_sam[i,]
+    
+    # covariance matrixes with set of parameters
+    K_pred_obs <- exp_covariance(S.pred,S.obs,s2_i,l_i)
+    K_pred <- exp_covariance(S.pred,S.pred,s2_i,l_i)
+    K_obs <- exp_covariance(S.obs,S.obs,s2_i,l_i)
+    
+    # mean and covariance for predicting phi in new locations given set of parameters and observed phi
+    phi_pred_m <- K_pred_obs %*% solve(K_obs,phi_obs_i)
+    phi_pred_Cov <- K_pred - K_pred_obs %*% solve(K_obs) %*% t(K_pred_obs)
+    
+    ### SAMPLE PHI PRED!!!
+    ### add jitter for computational stability
+    phi_pred_Cov <- phi_pred_Cov + 1e-08*diag(length(phi_pred_m))
+    
+    ### sample f_pred by sampling phi and adding the linear term
+    L <- t(chol(phi_pred_Cov))
+    phi_pred_i <- phi_pred_m + L %*% rnorm(length(phi_pred_m))
+    
+    # save spatial effects
+    phi_pred_sam <- rbind(phi_pred_sam, as.vector(P %*% phi_pred_i))
+    
+    ### add the spatial random effect
+    f_i <- f_i + as.vector(P %*% phi_pred_i) # P matrix picks the correct random effects (from the grid cell that the prediction point belongs to)
+    f_sam <- rbind(f_sam,f_i)
+    
+    ### mean of the distribution
+    mu_i <- inv_logit(f_i)
+    
+    # calculate expectations and probability of zeroes
+    
+    ### faster way to accomplish what was done within loop
+    EYi <- sapply(mu_i,integrate_LC_beta,rho=rho_i,a=a)
+    probzero_i <- sapply(mu_i,calculate_probzero_LC_beta,rho=rho_i,a=a)
+    
+    #save
+    EY_sam <- rbind(EY_sam,EYi)
+    probzero_sam <- rbind(probzero_sam, probzero_i)
+    
+    #take also predictions from y_tilde
+    V_i <- rbeta(nrow(Xpred),mu_i*rho_i,(1-mu_i)*rho_i)
+    y_i <- sapply(V_i, function(v) (max(0,(a+1)*v - a)))
+    y_sam <- rbind(y_sam, y_i)
+  }
+  
+  # return everything
+  return(list(f_sam = f_sam,
+              y_sam = y_sam,
+              EY_sam = EY_sam,
+              probzero_sam = probzero_sam,
+              rho_sam = rho_sam[seq(1,nrow(beta_sam),thinning), ],
+              phi_pred_sam = phi_pred_sam))
+}
+
+predict_spatial_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, pred.locations, S.pred, S.obs, thinning = 10, a = 1) {
+  ### X.pred: prediction matrix (mxp)
+  ### X.orig: non-scaled data matrix (nxp) to learn about the scaling parameters
+  # pred.locations: locations for each prediction cell (in meters)
+  # S.pred: locations of coarse spatial grid cells (in kilometers)
+  # S.obs: locations of observed coarse spatial grid cells (in kilometers, WATCH THAT THIS IS THE SAME AS WHEN FITTING A MODEL)
+  ### RETURNS rep x m matrix of samples from posterior predictive for latent f
+  
+  # posterior samples
+  # coefficients
+  alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
+  alpha_pi_sam <- as.matrix(stan_fit, pars = c("alpha_pi"))
+  beta_sam <- as.matrix(stan_fit, pars = c("beta_1","beta_2"))
+  beta_pi_sam <- as.matrix(stan_fit, pars = c("beta_pi_1","beta_pi_2"))
+  
+  # dispersion parameter for beta distribution
+  rho_sam <- as.matrix(stan_fit, pars = c("rho"))
+  
+  # spatial random effects
+  phi_sam <- as.matrix(stan_fit, pars = c("phi_mu"))
+  phi_pi_sam <- as.matrix(stan_fit, pars = c("phi_pi"))
+  
+  # covariance function parameters
+  l_sam <- as.matrix(stan_fit, pars = c("l_mu"))
+  s2_sam <- as.matrix(stan_fit, pars = c("s2_mu"))
+  
+  l_pi_sam <- as.matrix(stan_fit, pars = c("l_pi"))
+  s2_pi_sam <- as.matrix(stan_fit, pars = c("s2_pi"))
+  
+  # prepare prediction matrix
+  X.pred.scaled <- scale_covariates(X.orig,X.pred)
+  Xpred <- add_second_order_terms(X.pred.scaled, colnames(X.pred))
+  Xpred <- as.matrix(Xpred)
+  
+  # prepare P matrix (mxS) that tells in which spatial random effect cell each predition point belongs to
+  P <- prepare_P_matrix(pred.locations,S.pred*1000) # turn grid locations to meters
+  
+  # initialize matrix for posterior predictive of f_sam
+  f_sam <- c()
+  y_sam <- c()
+  EY_sam <- c()
+  probzero_sam <- c()
+  prob_suit_sam <- c()
+  EY_if_suitable_sam <- c()
+  phi_mu_pred_sam <- c()
+  phi_pi_pred_sam <- c()
+  
+  # loop over posterior samples
+  for (i in seq(1,nrow(beta_sam),thinning)) {
+    alpha_i <- alpha_sam[i,]
+    alpha_pi_i <- alpha_pi_sam[i,]
+    beta_i <- beta_sam[i,]
+    beta_pi_i <- beta_pi_sam[i,]
+    rho_i <- rho_sam[i,]
+    
+    ### 1) construct f for mean of the beta distribution
+    f_i <- as.vector(alpha_i + Xpred %*% beta_i)
+    
+    # sample spatial random effects
+    phi_obs_i <- phi_sam[i,]
+    l_i <- l_sam[i,]
+    s2_i <- s2_sam[i,]
+    
+    # covariance matrixes with set of parameters
+    K_pred_obs <- exp_covariance(S.pred,S.obs,s2_i,l_i)
+    K_pred <- exp_covariance(S.pred,S.pred,s2_i,l_i)
+    K_obs <- exp_covariance(S.obs,S.obs,s2_i,l_i)
+    
+    # mean and covariance for predicting phi in new locations given set of parameters and observed phi
+    phi_pred_m <- K_pred_obs %*% solve(K_obs,phi_obs_i)
+    phi_pred_Cov <- K_pred - K_pred_obs %*% solve(K_obs) %*% t(K_pred_obs)
+    
+    ### SAMPLE PHI PRED!!!
+    ### add jitter for computational stability
+    phi_pred_Cov <- phi_pred_Cov + 1e-08*diag(length(phi_pred_m))
+    
+    ### sample f_pred by sampling phi and adding the linear term
+    L <- t(chol(phi_pred_Cov))
+    phi_pred_i <- phi_pred_m + L %*% rnorm(length(phi_pred_m))
+    
+    # save spatial effects
+    phi_mu_pred_sam <- rbind(phi_mu_pred_sam, as.vector(P %*% phi_pred_i))
+    
+    ### add the spatial random effect
+    f_i <- f_i + as.vector(P %*% phi_pred_i) # P matrix picks the correct random effects (from the grid cell that the prediction point belongs to)
+    f_sam <- rbind(f_sam,f_i)
+    
+    ### mean of the distribution
+    mu_i <- inv_logit(f_i)
+    
+    ### 2) construct f for the probability of suitability
+    f_pi_i <- as.vector(alpha_pi_i + Xpred %*% beta_pi_i)
+    
+    # sample spatial random effects
+    phi_obs_i <- phi_pi_sam[i,]
+    l_i <- l_pi_sam[i,]
+    s2_i <- s2_pi_sam[i,]
+    
+    # covariance matrixes with set of parameters
+    K_pred_obs <- exp_covariance(S.pred,S.obs,s2_i,l_i)
+    K_pred <- exp_covariance(S.pred,S.pred,s2_i,l_i)
+    K_obs <- exp_covariance(S.obs,S.obs,s2_i,l_i)
+    
+    # mean and covariance for predicting phi in new locations given set of parameters and observed phi
+    phi_pred_m <- K_pred_obs %*% solve(K_obs,phi_obs_i)
+    phi_pred_Cov <- K_pred - K_pred_obs %*% solve(K_obs) %*% t(K_pred_obs)
+    
+    ### SAMPLE PHI PRED!!!
+    ### add jitter for computational stability
+    phi_pred_Cov <- phi_pred_Cov + 1e-08*diag(length(phi_pred_m))
+    
+    ### sample f_pred by sampling phi and adding the linear term
+    L <- t(chol(phi_pred_Cov))
+    phi_pi_pred_i <- phi_pred_m + L %*% rnorm(length(phi_pred_m))
+    
+    # save spatial effects
+    phi_pi_pred_sam <- rbind(phi_pi_pred_sam, as.vector(P %*% phi_pi_pred_i))
+    
+    ### add the spatial random effect
+    f_pi_i <- f_pi_i + as.vector(P %*% phi_pi_pred_i) # P matrix picks the correct random effects (from the grid cell that the prediction point belongs to)
+
+    ### probability of suitability
+    pi_i <- inv_logit(f_pi_i)
+    prob_suit_sam <- rbind(prob_suit_sam, pi_i)
+    
+    ### 3) calculate expectations and probability of zeroes
+    
+    ### faster way to accomplish what was done within loop
+    EYi <- mapply(integrate_ZI_LC_beta,mu=mu_i,pi=pi_i, MoreArgs = list(rho=rho_i,a=a))
+    EYi_if_suitable <- sapply(mu_i,integrate_LC_beta,rho=rho_i,a=a)
+    probzero_i <- mapply(calculate_probzero_ZI_LC_beta,mu=mu_i,pi=pi_i, MoreArgs = list(rho=rho_i,a=a))
+    
+    #save
+    EY_sam <- rbind(EY_sam,EYi)
+    EY_if_suitable_sam <- rbind(EY_if_suitable_sam, EYi_if_suitable)
+    probzero_sam <- rbind(probzero_sam, probzero_i)
+    
+    #take also predictions from y_tilde
+    Z_i <- rbinom(nrow(Xpred),1,pi_i) #0/1 vector to tell whether the location is suitable (1 => Y from beta) or unsuitable (0 => Y=0)
+    V_i <- rbeta(nrow(Xpred),mu_i*rho_i,(1-mu_i)*rho_i)
+    y_i <- sapply(V_i, function(v) (max(0,(a+1)*v - a)))
+    y_i <- Z_i*y_i #if the location was unsuitable, set to 0
+    y_sam <- rbind(y_sam, y_i)
+  }
+  
+  # return everything
+  return(list(f_sam = f_sam,
+              y_sam = y_sam,
+              EY_sam = EY_sam,
+              probzero_sam = probzero_sam,
+              prob_suit_sam = prob_suit_sam,
+              EY_if_suitable_sam = EY_if_suitable_sam,
+              rho_sam = rho_sam[seq(1,nrow(beta_sam),thinning), ],
+              phi_mu_pred_sam = phi_mu_pred_sam,
+              phi_pi_pred_sam = phi_pi_pred_sam))
+}
+  
 
 plot_responses_beta_regression <- function(stan_fit, X.train, X.orig, is_standardized = TRUE, second_order = TRUE, xmin=-3, xmax=3, ymin=0, ymax=1,
                                            plot_nx=3, plot_ny=3,a=1,type="expectation") {
@@ -330,7 +763,7 @@ plot_responses_beta_regression <- function(stan_fit, X.train, X.orig, is_standar
   # type: either "expectation" or "probzero"
   
   alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
-  beta_sam <- as.matrix(stan_fit, pars = c("beta"))
+  beta_sam <- as.matrix(stan_fit, pars = c("beta_1","beta_2"))
   rho_sam <- as.matrix(stan_fit, pars = c("rho"))
   
   ### response curves
@@ -398,6 +831,8 @@ plot_responses_beta_regression <- function(stan_fit, X.train, X.orig, is_standar
          main=colnames(X.train)[i],ylim = c(ymin,ymax))
   }
 }
+
+
 
 plot_responses_ZI_beta_regression <- function(stan_fit, X.train, X.orig, is_standardized = TRUE, second_order = TRUE, xmin=-3, xmax=3, ymin=0, ymax=1,
                                               plot_nx=3, plot_ny=3,a=1,type="expectation") {
@@ -566,6 +1001,7 @@ plot_separate_responses_ZI_beta_regression <- function(stan_fit, X.train, X.orig
   legend("center", legend = c("E[Coverage|Suitable]","Pr(Suitable)"), col = c("red","blue"), lty = 1, bty = "n")
 }
 
+
 average_distribution_beta_regression <- function(mod,a=1,sp_name) {
   par(mfrow = c(1,1),
       mar = c(4,4,2,0))
@@ -675,6 +1111,7 @@ plot_spatial_effects_beta <- function(mod,s_obs,s_pred,grid.vect,obs.vect,shorel
   phi_pred_m <- K_pred_obs %*% solve(K_obs,phi_obs)
   phi_pred_Cov <- K_pred - K_pred_obs %*% solve(K_obs) %*% t(K_pred_obs)
   
+  # predictive mean
   grid.vect$spat_eff <- phi_pred_m
   
   grid.rast <- rast(ext = ext(grid.vect), crs = "EPSG:3067")
