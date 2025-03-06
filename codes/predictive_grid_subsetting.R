@@ -223,13 +223,14 @@ writeVector(predictive_grid_wo_deep_sea,filename = "data/estonia_new/predictive_
 pred_grid_df <- as.data.frame(centroids(predictive_grid), geom = "XY")
 
 vars <- c("depth","no3_bottom","o2_bottom","po4_bottom","zsd","bottomT","so_bottom","current_bottom","chl_bottom")
-vars <- c("depth","no3_bottom","o2_bottom","po4_bottom","zsd","bottomT","so_bottom","current_bottom","chl_bottom","depth_to_secchi")
+vars <- c("depth","no3_bottom","o2_bottom","po4_bottom","zsd","bottomT","so_bottom","current_bottom","chl_bottom","depth_to_secchi","light_bottom")
 
 ### try the raster version
 #vect_grid <- vect(pred_grid_df, geom = c("x","y"), crs = "EPSG:3067")
 vect_grid <- predictive_grid
 vect_grid$depth <- -1*vect_grid$depth
 vect_grid$depth_to_secchi <- vect_grid$depth / vect_grid$zsd
+vect_grid$light_bottom <- exp(-1.7*vect_grid$depth/vect_grid$zsd)
 vect_rast <- rast(ext = ext(vect_grid), res = 1000, crs = "EPSG:3067")
 
 for (var in vars) {

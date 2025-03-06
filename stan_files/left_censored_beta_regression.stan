@@ -9,27 +9,29 @@ data {
 
 parameters {
   vector[n_var/2] beta_1; // first order terms
-  //vector<upper=0>[n_var/2] beta_2;
-  vector[n_var/2] logneg_beta_2; //unconstrained version, theta = log(-B) <=> B = -exp(theta)
+  vector<upper=0>[n_var/2] beta_2;
+  //vector[n_var/2] logneg_beta_2; //unconstrained version, theta = log(-B) <=> B = -exp(theta)
   real alpha;
   real<lower=0> rho; // scale parameter for beta distribution
 }
 
 transformed parameters{
   vector[N] mu;
-  mu = inv_logit(alpha + X*append_row(beta_1,-exp(logneg_beta_2)));
+  //mu = inv_logit(alpha + X*append_row(beta_1,-exp(logneg_beta_2)));
+  mu = inv_logit(alpha + X*append_row(beta_1,beta_2));
 }
 
 model {
   // priors for coefficients
   //beta_1 ~ multi_normal(rep_vector(0,n_var/2),diag_matrix(rep_vector(sqrt(2),n_var/2)));
-  beta_1 ~ normal(0,sqrt(2));
   //beta_2 ~ multi_normal(rep_vector(0,n_var/2),diag_matrix(rep_vector(sqrt(2),n_var/2)));
-  logneg_beta_2 ~ normal(0,1); 
+  beta_1 ~ normal(0,sqrt(2));
+  beta_2 ~ normal(0,sqrt(2));
+  //logneg_beta_2 ~ normal(0,1); 
 
   alpha ~ normal(0,sqrt(2)); // ORIGINAL
   // rho ~ inv_gamma(0.5,0.5);
-  rho ~ cauchy(0,sqrt(5));
+  rho ~ cauchy(0,sqrt(10));
   
   // likelihood
   for (i in 1:N) {
@@ -54,8 +56,8 @@ model {
 
 generated quantities {
   // return beta_2 in constrained space
-  vector[n_var/2] beta_2;
-  beta_2 = -exp(logneg_beta_2);
+  //vector[n_var/2] beta_2;
+  //beta_2 = -exp(logneg_beta_2);
   
   vector[N] log_lik;
 
