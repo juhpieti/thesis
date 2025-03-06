@@ -29,7 +29,8 @@ train <- train[,!(colnames(train) %in% c("Furcellaria lumbricalis loose form","T
 
 # prepare the covariate matrix
 X <- train[,11:19]
-X$depth_to_secchi <- X$depth / X$zsd # add secchi/depth for a variable representing seafloor light level
+#X$depth_to_secchi <- X$depth / X$zsd # add secchi/depth for a variable representing seafloor light level
+X$light_bottom <- exp(-1.7*X$depth / X$zsd)
 X.scaled <- scale_covariates(X)
 ### add the second order terms
 X.sec_ord <- add_second_order_terms(X.scaled,colnames(X.scaled))
@@ -48,7 +49,7 @@ loo_table <- c()
 sp_names <- colnames(train)[20:35]
 n_chains <- 4
 n_iter <- 50
-for (sp_name in sp_names[1:1]) {
+for (sp_name in sp_names[11:16]) {
   y <- train[,sp_name]
   y.01 <- y/100
   
@@ -59,7 +60,7 @@ for (sp_name in sp_names[1:1]) {
                          a = 1)
   
   mod.beta <- stan("stan_files/left_censored_beta_regression.stan", data = dat.beta, chains = n_chains, iter = n_iter, seed = 42,
-                         pars = c("mu","logneg_beta_2"), include = FALSE)
+                         pars = c("mu"), include = FALSE)
   
   sp_name_modified <- gsub(" ","_",sp_name)
   sp_name_modified <- gsub("/","_",sp_name_modified)
@@ -77,14 +78,13 @@ for (sp_name in sp_names[1:1]) {
 #pred_grid_2021_july_df$depth <- -1*pred_grid_2021_july_df$depth # note that depth should be positive! as in training data
 
 ### species 1: amphi
-mod_amphi <- readRDS("models/demo/M1/amphi.rds")
 mod_amphi <- readRDS("models/M1/Amphibalanus_improvisus.rds")
 mod_chara <- readRDS("models/demo/M1/chara.rds")
 
 start_time <- Sys.time()
 pred_list_m1 <- predict_beta_regression(mod_amphi,pred_grid_1km_2021_july_df[,2:10],X,10)
 pred_list_m1 <- predict_beta_regression(mod_amphi,
-                                        cbind(pred_grid_1km_2021_july_df[,2:10],pred_grid_1km_2021_july_df$depth / pred_grid_1km_2021_july_df$zsd),
+                                        cbind(pred_grid_1km_2021_july_df[,2:10],exp(-1.7*pred_grid_1km_2021_july_df$depth / pred_grid_1km_2021_july_df$zsd)),
                                         X,10)
 #pred_list <- predict_beta_regression(mod_chara,pred_grid_1km_2021_july_df[,2:10],X,5)
 end_time <- Sys.time()
@@ -132,7 +132,7 @@ plot(r.vars,colNA="lightgrey", main = "Amphi variance: M1 (w/o ZI, w/o RE)")
 
 ### species 2: chara
 
-
+#################################### RESPONSE PLOTS ###########################################
 
 ### responses using prediction functions...!
 grid_length <- 200
@@ -148,9 +148,6 @@ colmeans_matrix <- matrix(rep(colMeans(X),grid_length), nrow = grid_length, byro
 colnames(colmeans_matrix) <- colnames(X)
 
 ### go through variables and plot
-par(mfrow = c(3,3),
-    mar = c(4,4,2,0))
-
 par(mfrow = c(3,4),
     mar = c(4,4,2,0))
 

@@ -20,6 +20,7 @@ source("codes/helpers.R")
 
 # load in the training data
 load("data/estonia_new/train_2020_2021.Rdata")
+#load("data/estonia_new/train_2020_2021_n1000.Rdata")
 colnames(df_sub)
 colSums(df_sub[,20:38] > 0)
 
@@ -29,6 +30,7 @@ train <- train[,!(colnames(train) %in% c("Furcellaria lumbricalis loose form","T
 
 # prepare the covariate matrix
 X <- train[,11:19]
+X$depth_to_secchi <- X$depth / X$zsd # add secchi/depth for a variable representing seafloor light level
 X.scaled <- scale_covariates(X)
 ### add the second order terms
 X.sec_ord <- add_second_order_terms(X.scaled,colnames(X.scaled))
@@ -77,8 +79,8 @@ observed_grid_cells.df <- observed_grid_cells.df/1000
 # loop over the species, save the models
 sp_names <- colnames(train)[20:35]
 n_chains <- 4
-n_iter <- 50
-for (sp_name in sp_names[1:1]) {
+n_iter <- 200
+for (sp_name in sp_names[10:10]) {
   y <- train[,sp_name]
   y.01 <- y/100
   
@@ -94,7 +96,7 @@ for (sp_name in sp_names[1:1]) {
   
   
   mod.ZIBeta_spat <- stan("stan_files/zero_inflated_left_censored_beta_regression_spatial.stan", data = dat.beta_spat, chains = n_chains, iter = n_iter, seed = 42,
-                                pars = c("mu","prob_suit","logneg_beta_2","logneg_beta_pi_2"), include = FALSE)
+                                pars = c("mu","prob_suit","z"), include = FALSE)
   
   sp_name_modified <- gsub(" ","_",sp_name)
   sp_name_modified <- gsub("/","_",sp_name_modified)
@@ -104,23 +106,21 @@ for (sp_name in sp_names[1:1]) {
   saveRDS(mod.ZIBeta_spat, f_name)
 }
 
+
+############## FROM THIS ONWARDS TO OTHER SCRIPT
+
 #load in the models
 mod_amphi.spat.ZI <- readRDS("models/M4/Amphibalanus_improvisus.rds")
-mod_amphi.spat.ZI <- readRDS("models/demo/M4/amphi.rds")
-mod_chara.spat <- readRDS("models/demo/M4/chara.rds")
 
 pred_list_m4 <- predict_spatial_ZI_beta_regression(mod_amphi.spat.ZI,pred_grid_1km_2021_july_df[,2:10],X,
                                                      pred_grid_1km_2021_july_df[,c("x","y")],
                                                      grid_centers.df/1000, observed_grid_cells.df,10,1)
 
 pred_list_m4 <- predict_spatial_ZI_beta_regression(mod_amphi.spat.ZI,
-                                                   cbind(pred_grid_1km_2021_july_df[,2:10],pred_grid_1km_2021_july_df$depth / pred_grid_1km_2021_july_df$zsd),
+                                                   cbind(pred_grid_1km_2021_july_df[,2:10],exp(-1.7*pred_grid_1km_2021_july_df$depth / pred_grid_1km_2021_july_df$zsd)),
                                                    X,
                                                    pred_grid_1km_2021_july_df[,c("x","y")],
                                                    grid_centers.df/1000, observed_grid_cells.df,10,1)
-
-
-
 
 
 locs <- pred_grid_1km_2021_july_df[,c("x","y")]

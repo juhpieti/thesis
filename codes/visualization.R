@@ -38,7 +38,8 @@ for (sp_name in sp_list) {
 
 ### pairplots for each species
 X <- estonia_sub[,c(11:19)]
-X$depth_to_secchi <- X$depth/X$zsd
+# X$depth_to_secchi <- X$depth/X$zsd
+X$light_bottom <- exp(-1.7*X$depth/X$zsd)
 
 for (i in 20:35) {
   y <- estonia_sub[,i]
@@ -46,7 +47,7 @@ for (i in 20:35) {
   sp_name <- gsub(" ","_",sp_name)
   sp_name <- gsub("/","_",sp_name)
   
-  png(paste0("plots/estonia_new/training_data/species_against_covariates_2/",sp_name))
+  png(paste0("plots/estonia_new/training_data/species_against_covariates_3/",sp_name))
   par(mfrow = c(3,4),
       mar = c(4,4,2,0))
   for(j in 1:ncol(X)) {
@@ -110,12 +111,15 @@ load("data/estonia_new/train_2020_2021.Rdata")
 spatial_grid <- vect("data/estonia_new/spatial_random_effect_grid_20km/spatial_random_effect_grid_20km.shp")
 
 estonia_sub.vect <- vect(df_sub, geom = c("x","y"), crs = "EPSG:3067")
+train.vect.lonlat <- project(estonia_sub.vect, "EPSG:4326")
 #ext(estonia_sub.vect) <- ext(spatial_grid)
 
 ### visualize the data spatially
 europe.vect <- vect("europe_coastline_shapefile/Europe_coastline_poly.shp")
+europe.vect.lonlat <- project(europe.vect, "EPSG:4326")
 europe.vect <- project(europe.vect, "EPSG:3067") #reproject to TM35FIN
 
+### spatial random effect grid
 par(mfrow = c(1,1))
 plot(spatial_grid, xlab = "Easting (m)", ylab = "Northing (m)")
 plot(europe.vect.cut, col = "lightgrey", add = TRUE)
@@ -125,24 +129,35 @@ plot(estonia_sub.vect, add = TRUE, col = "red", cex = 0.8)
 sbar(xy = "bottomright", type = "bar", divs = 10, scaleby = 1000, below = "km")
 north(xy = c(600000,6370000),type = 2)
 
-
-# crop for some region of interest
-#ext_vec <- c(0,566613.8,6000000,6650000)
-#ext_vec <- c(100000,600000,6300000,6650000)
-ext_vec_large <- c(-1000000,900000,6100000,8000000)
-
-europe.vect.cut <- crop(europe.vect,ext_vec_large)
-
+### same but without the grid itself
 par(mfrow = c(1,1))
-plot(europe.vect.cut, col = "lightgrey", xlab = "easting (m)", ylab = "northing (m)")
-plot(estonia_sub.vect, cex = 1, col = "red", add = TRUE)
+#plot(spatial_grid, xlab = "Easting (m)", ylab = "Northing (m)", border = NA, background = "lightblue1")
+plot(spatial_grid, xlab = "Easting (m)", ylab = "Northing (m)", border = NA)
+#plot(europe.vect.cut, col = "darkseagreen3", add = TRUE)
+plot(europe.vect.cut, col = "lightgrey", add = TRUE)
+plot(estonia_sub.vect, add = TRUE, col = "red", cex = 0.8)
+
+### add scale bars?
+sbar(d = 100000, xy = "bottomright", type = "bar", divs = 10, scaleby = 1000, below = "km")
+north(xy = c(600000,6370000),type = 2)
 
 
-ext_vec <- c(100000,630000,6300000,6650000)
-europe.vect.cut <- crop(europe.vect,ext_vec)
+# crop for some region of interest in longitudes and latitudes for plotting the broader image
+#ext_vec_lonlat <- c(-25,60,45,80)
+ext_vec_lonlat <- c(-25,60,47,73)
+#ext_vec_lonlat <- c(-25,55,50,75)
 
+europe.vect.lonlat.cut <- crop(europe.vect.lonlat, ext_vec_lonlat)
+  
 par(mfrow = c(1,1))
-plot(spatial_grid, alpha = 100)
-plot(estonia_sub.vect, cex = 1, col = "red", xlab  = "easting (m)", ylab = "northing (m)")
-plot(europe.vect.cut, add = TRUE, col = "lightgrey")
-plot(estonia_sub.vect, cex = 1, col = "red", main = "observations", add = TRUE)
+plot(europe.vect.lonlat.cut, col = "lightgrey", xlab = "longitude (degrees)", ylab = "latitude (degrees)")
+plot(train.vect.lonlat, cex = 0.5, col = "red", add = TRUE)
+
+#sbar(xy = "bottomright", type = "bar", divs = 10, scaleby = 1000, below = "km")
+sbar(d = 1000, xy = "bottomright", type = "bar", divs = 4, below = "km", lonlat = TRUE)
+north(xy = c(-23,71),type = 2)
+
+### draw extent of spatial grid
+spatial_grid.lonlat <- project(spatial_grid, "EPSG:4326")
+
+plot(as.polygons(ext(spatial_grid.lonlat)), add = TRUE, border = "blue", lwd = 2)

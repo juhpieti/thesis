@@ -521,7 +521,7 @@ predict_spatial_beta_regression <- function(stan_fit, X.pred, X.orig, pred.locat
   Xpred <- add_second_order_terms(X.pred.scaled, colnames(X.pred))
   Xpred <- as.matrix(Xpred)
   
-  # prepare P matrix (mxS) that tells in which spatial random effect cell each predition point belongs to
+  # prepare P matrix (mxS) that tells in which spatial random effect cell each prediction point belongs to
   P <- prepare_P_matrix(pred.locations,S.pred*1000) # turn grid locations to meters
   
   # initialize matrix for posterior predictive of f_sam

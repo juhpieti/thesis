@@ -48,7 +48,7 @@ loo_table <- c()
 sp_names <- colnames(train)[20:35]
 n_chains <- 4
 n_iter <- 50
-for (sp_name in sp_names[1:1]) {
+for (sp_name in sp_names[11:16]) {
   y <- train[,sp_name]
   y.01 <- y/100
   
@@ -59,7 +59,7 @@ for (sp_name in sp_names[1:1]) {
                    a = 1)
   
   mod.ZIbeta <- stan("stan_files/zero_inflated_left_censored_beta_regression.stan",data = dat.beta, chains = n_chains, iter = n_iter, seed = 42,
-                           pars = c("mu","prob_suit","logneg_beta_2","logneg_beta_pi_2"), include = FALSE)
+                           pars = c("mu","prob_suit"), include = FALSE)
   
   sp_name_modified <- gsub(" ","_",sp_name)
   sp_name_modified <- gsub("/","_",sp_name_modified)
@@ -79,13 +79,12 @@ for (sp_name in sp_names[1:1]) {
 
 ### species 1: amphi
 mod_amphi.ZI <- readRDS("models/M2/Amphibalanus_improvisus.rds")
-mod_amphi.ZI <- readRDS("models/demo/M2/amphi.rds")
 #mod_chara <- readRDS("models/demo/M1/chara.rds")
 
 start_time <- Sys.time()
 pred_list_m2 <- predict_ZI_beta_regression(mod_amphi.ZI,pred_grid_1km_2021_july_df[,2:10],X,10)
 pred_list_m2 <- predict_ZI_beta_regression(mod_amphi.ZI,
-                                           cbind(pred_grid_1km_2021_july_df[,2:10],pred_grid_1km_2021_july_df$depth / pred_grid_1km_2021_july_df$zsd),
+                                           cbind(pred_grid_1km_2021_july_df[,2:10],exp(-1.7*pred_grid_1km_2021_july_df$depth / pred_grid_1km_2021_july_df$zsd)),
                                            X,10)
 
 #pred_list <- predict_ZI_beta_regression(mod_chara,pred_grid_1km_2021_july_df[,2:10],X,5)
@@ -148,10 +147,6 @@ colmeans_matrix <- matrix(rep(colMeans(X),grid_length), nrow = grid_length, byro
 colnames(colmeans_matrix) <- colnames(X)
 
 ### go through variables and plot
-par(mfrow = c(3,3),
-    mar = c(4,4,2,0))
-
-
 par(mfrow = c(3,4),
     mar = c(4,4,2,0))
 
@@ -249,7 +244,7 @@ cols <- rainbow(length(prob.zero_list))
 #cols <- c("red","royalblue","forestgreen","yellow2")
 for (i in 1:ncol(X)) {
   plot(NULL, xlim = c(min(grid_matrix[,i]), max(grid_matrix[,i])), ylim = c(0,1.1),
-       xlab = "value", ylab = "relative exp. coverage", main = colnames(X)[i], lwd = 1)
+       xlab = "value", ylab = "prob. of zero", main = colnames(X)[i], lwd = 1)
   for (j in 1:length(prob.zero_list)) {
     lines(grid_matrix[,i],prob.zero_list[[j]][,i], col = cols[j], lwd = 1)
   }
