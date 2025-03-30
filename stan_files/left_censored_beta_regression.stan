@@ -23,23 +23,21 @@ transformed parameters{
 
 model {
   // priors for coefficients
-  //beta_1 ~ multi_normal(rep_vector(0,n_var/2),diag_matrix(rep_vector(sqrt(2),n_var/2)));
-  //beta_2 ~ multi_normal(rep_vector(0,n_var/2),diag_matrix(rep_vector(sqrt(2),n_var/2)));
   beta_1 ~ normal(0,sqrt(2));
   beta_2 ~ normal(0,sqrt(2));
+  //beta_1 ~ double_exponential(0,1);
+  //beta_2 ~ double_exponential(0,1);
   //logneg_beta_2 ~ normal(0,1); 
 
   alpha ~ normal(0,sqrt(2)); // ORIGINAL
-  // rho ~ inv_gamma(0.5,0.5);
   rho ~ cauchy(0,sqrt(10));
   
   // likelihood
   for (i in 1:N) {
     // calculate the mean parameter
     real mu_i;
-    //mu_i = inv_logit(alpha + X[i,1:(n_var/2)] * beta_1 + X[i,(1+n_var/2):n_var] * beta_2);
     mu_i = mu[i];
-    mu_i = fmin(fmax(mu_i,1e-08), 1 - 1e-08);
+    mu_i = fmin(fmax(mu_i,1e-08), 1 - 1e-08); // prevent exact 0 and 1
     if (y[i] == 0) {
       target += beta_lcdf(a/(a+1) | mu_i*rho, (1-mu_i)*rho);
       // target += beta_proportion_lcdf(a/(a+1) | mu_i, phi);
@@ -63,18 +61,15 @@ generated quantities {
 
   for (i in 1:N) {
     real mu_i;
-    //mu_i = inv_logit(alpha + X[i,1:(n_var/2)] * beta_1 + X[i,(1+n_var/2):n_var] * beta_2);
     mu_i = mu[i];
     mu_i = fmin(fmax(mu_i,1e-08), 1 - 1e-08);
     
     if (y[i] == 0) {
       log_lik[i] = beta_lcdf(a/(a+1) | mu_i*rho, (1-mu_i)*rho);
-      // log_lik[i] = beta_proportion_lcdf(a/(a+1) | mu_i, phi);
     } else if (y[i]==1) {
       log_lik[i] = beta_lpdf((y[i]-1e-08+a)/(a+1) | mu_i*rho, (1-mu_i)*rho) - log(1+a);
     } else {
       log_lik[i] = beta_lpdf((y[i]+a)/(a+1) | mu_i*rho, (1-mu_i)*rho) - log(1+a); // scale to [0,1] interval
-      // log_lik[i] = beta_proportion_lpdf((y[i]+a)/(a+1) | mu_i, phi);
     }
   }
 }

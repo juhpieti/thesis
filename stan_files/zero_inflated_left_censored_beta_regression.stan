@@ -36,17 +36,18 @@ transformed parameters {
 
 model {
   // priors for coefficients
-  //beta ~ multi_normal(rep_vector(0,n_var),diag_matrix(rep_vector(sqrt(2),n_var))); // ORIGINAL
-  //beta_pi ~ multi_normal(rep_vector(0,n_var),diag_matrix(rep_vector(sqrt(2),n_var)));
   beta_1 ~ normal(0,sqrt(2));
   beta_2 ~ normal(0,sqrt(2));
+  //beta_1 ~ double_exponential(0,1); //Laplace
+  //beta_2 ~ double_exponential(0,1);
   //logneg_beta_2 ~ normal(0,1);
   beta_pi_1 ~ normal(0,sqrt(2));
   beta_pi_2 ~ normal(0,sqrt(2));
+  //beta_pi_1 ~ double_exponential(0,1);
+  //beta_pi_2 ~ double_exponential(0,1);
   //logneg_beta_pi_2 ~ normal(0,1);
   alpha ~ normal(0,sqrt(2)); // ORIGINAL
-  alpha_pi ~ normal(0,sqrt(2));
-  //rho ~ inv_gamma(0.1,0.1);
+  alpha_pi ~ normal(0,sqrt(2)); //
   rho ~ cauchy(0,sqrt(10));
   
   // likelihood
@@ -98,7 +99,6 @@ generated quantities {
     // likelihood terms
     if (y[i] == 0) {
       log_lik[i] = log_sum_exp(log(1-pi_i), log(pi_i) + beta_lcdf(a/(a+1) | mu_i*rho, (1-mu_i)*rho));
-      // log_lik[i] = beta_proportion_lcdf(a/(a+1) | mu_i, phi);
     } else if (y[i] == 1) {
       log_lik[i] = beta_lpdf((y[i]-1e-08+a)/(a+1) | mu_i*rho, (1-mu_i)*rho) - log(1+a) + log(pi_i);
       //log_lik[i] += log(pi_i);

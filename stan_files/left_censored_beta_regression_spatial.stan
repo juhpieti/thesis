@@ -38,7 +38,7 @@ transformed parameters {
       }
     }
 
-    K = K + diag_matrix(rep_vector(1e-08,n_obs_grid));
+    K = K + diag_matrix(rep_vector(1e-08,n_obs_grid)); // jitter for stability
     
     // generate the random effects
     L = cholesky_decompose(K);
@@ -68,21 +68,20 @@ model {
   //phi ~ multi_normal(rep_vector(0,n_obs_grid),K); //GP(0,K)
   
   // priors for coefficients
-  // beta_1 ~ multi_normal(rep_vector(0,n_var/2),diag_matrix(rep_vector(sqrt(2),n_var/2)));
-  // beta_2 ~ multi_normal(rep_vector(0,n_var/2),diag_matrix(rep_vector(sqrt(2),n_var/2)));
   beta_1 ~ normal(0,sqrt(2));
   beta_2 ~ normal(0,sqrt(2));
+  //beta_1 ~ double_exponential(0,1);
+  //beta_2 ~ double_exponential(0,1);
   //logneg_beta_2 ~ normal(0,1);
   alpha ~ normal(0,sqrt(2)); // ORIGINAL
-  //rho ~ inv_gamma(0.1,0.1);
   rho ~ cauchy(0,sqrt(10));
   
   z ~ normal(0,1);
   // priors for covariance function
-  //s2_cf ~ inv_gamma(0.01,0.01);
-  s2_cf ~ cauchy(0,sqrt(0.01));
-  //s2_cf ~ inv_gamma(2,1);
-  //l ~ inv_gamma(1,1);
+  s2_cf ~ student_t(4,0,sqrt(0.1));
+  //s2_cf ~ student_t(1,0,sqrt(0.1));
+
+  //s2_cf ~ cauchy(0,sqrt(0.01));
   l ~ cauchy(8,sqrt(50));
   
   for (i in 1:N) {
@@ -92,7 +91,6 @@ model {
     mu_i = fmin(fmax(mu_i,1e-08), 1 - 1e-08); // prevent exactly 0 or exactly 1
     if (y[i] == 0) {
       target += beta_lcdf(a/(a+1) | mu_i*rho, (1-mu_i)*rho);
-      // target += beta_proportion_lcdf(a/(a+1) | mu_i, phi);
     } else if (y[i] ==  1) {
       // substract a small value
       (y[i]-1e-08+a)/(a+1) ~ beta(mu_i*rho, (1-mu_i)*rho);
@@ -115,18 +113,15 @@ generated quantities {
   for (i in 1:N) {
     // calculate the mean parameter
     real mu_i;
-    //mu_i = inv_logit(alpha + X[i,1:(n_var/2)] * beta_1 + X[i,(1+n_var/2):n_var] *  beta_2 + P[i,]*phi);
     mu_i = mu[i];
     mu_i = fmin(fmax(mu_i,1e-08), 1 - 1e-08);
     
     if (y[i] == 0) {
       log_lik[i] = beta_lcdf(a/(a+1) | mu_i*rho, (1-mu_i)*rho);
-      // log_lik[i] = beta_proportion_lcdf(a/(a+1) | mu_i, phi);
     } else if (y[i]==1) {
       log_lik[i] = beta_lpdf((y[i]-1e-08+a)/(a+1) | mu_i*rho, (1-mu_i)*rho) - log(1+a);
     } else {
       log_lik[i] = beta_lpdf((y[i]+a)/(a+1) | mu_i*rho, (1-mu_i)*rho) - log(1+a); // scale to [0,1] interval
-      // log_lik[i] = beta_proportion_lpdf((y[i]+a)/(a+1) | mu_i, phi);
     }
   }
 }

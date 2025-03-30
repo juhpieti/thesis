@@ -64,8 +64,8 @@ transformed parameters {
       }
     }
     
-    K_mu = K_mu + diag_matrix(rep_vector(1e-08,n_obs_grid));
-    K_pi = K_pi + diag_matrix(rep_vector(1e-08,n_obs_grid));
+    K_mu = K_mu + diag_matrix(rep_vector(1e-08,n_obs_grid)); // jitter for stability
+    K_pi = K_pi + diag_matrix(rep_vector(1e-08,n_obs_grid)); // jitter for stability
 
     // generate the random effects
     L_mu = cholesky_decompose(K_mu);
@@ -80,7 +80,6 @@ transformed parameters {
     prob_suit = inv_logit(alpha_pi + X*append_row(beta_pi_1,beta_pi_2) + P*phi_pi);
   }
     
-
 }
 
 model {
@@ -115,9 +114,13 @@ model {
   // priors for coefficients
   beta_1 ~ normal(0,sqrt(2));
   beta_2 ~ normal(0,sqrt(2));
+  //beta_1 ~ double_exponential(0,1);
+  //beta_2 ~ double_exponential(0,1);
   //logneg_beta_2 ~ normal(0,1);
   beta_pi_1 ~ normal(0,sqrt(2));
   beta_pi_2 ~ normal(0,sqrt(2));
+  //beta_pi_1 ~ double_exponential(0,1);
+  //beta_pi_2 ~ double_exponential(0,1);
   //logneg_beta_pi_2 ~ normal(0,1);
   
   alpha ~ normal(0,sqrt(2)); // ORIGINAL
@@ -126,12 +129,26 @@ model {
   rho ~ cauchy(0,sqrt(10));
   
   z ~ normal(0,1);
+
+  // first try
+  //s2_mu ~ cauchy(0,sqrt(0.01));
+  //s2_pi ~ cauchy(0,sqrt(0.001));
+
+  // second try
+  //s2_mu ~ student_t(4,0,sqrt(0.1));
+  //s2_pi ~ student_t(10,0,sqrt(0.1));
   
-  // s2_mu ~ inv_gamma(0.01,0.01);
-  // s2_pi ~ inv_gamma(0.01,0.01);
+  // third try
+  s2_mu ~ student_t(2,0,sqrt(0.1));
+  s2_pi ~ student_t(4,0,sqrt(0.1));
   
-  s2_mu ~ cauchy(0,sqrt(0.01));
-  s2_pi ~ cauchy(0,sqrt(0.01));
+  // fourth try
+  //sqrt(s2_mu) ~ student_t(4,0,sqrt(0.1));
+  //target += log(2*sqrt(s2_mu));
+  //sqrt(s2_pi) ~ student_t(4,0,sqrt(0.1));
+  //target += log(2*sqrt(s2_mu));
+  
+  
   l_mu ~ cauchy(8,sqrt(50));
   l_pi ~ cauchy(8,sqrt(50));
   
@@ -140,13 +157,11 @@ model {
     // calculate the mean parameter for beta distribution
     real mu_i;
     mu_i = mu[i];
-    //mu_i = inv_logit(alpha + X[i,] * beta + P[i,]*phi_mu);
     mu_i = fmin(fmax(mu_i,1e-08), 1 - 1e-08); // there was problems of getting exact 0/1 with beta distribution calls
-    // calculate the probability of suitability
     
+    // calculate the probability of suitability
     real pi_i;
     pi_i = prob_suit[i];
-    //pi_i = inv_logit(alpha_pi + X[i,] * beta_pi + P[i,]*phi_pi);
     pi_i = fmin(fmax(pi_i,1e-08), 1 - 1e-08);
     
     // likelihood terms
