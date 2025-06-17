@@ -19,7 +19,16 @@ rstan_options(auto_write = TRUE)
 source("codes/helpers.R")
 
 # load in the training data
-load("data/estonia_new/train_2020_2021.Rdata")
+#load("data/estonia_new/train_2020_2021.Rdata")
+load("data/estonia_new/train/train_2020_2021_n500.Rdata") # should be identical to the upper one
+df_sub <- train_n500
+
+load("data/estonia_new/train/train_2020_2021_n1000.Rdata")
+df_sub <- train_n1000
+
+load("data/estonia_new/train/train_2020_2021_n2000.Rdata")
+df_sub <- train_n2000
+
 colnames(df_sub)
 colSums(df_sub[,20:38] > 0)
 
@@ -31,6 +40,8 @@ train <- train[,!(colnames(train) %in% c("Furcellaria lumbricalis loose form","T
 X <- train[,11:19]
 #X$depth_to_secchi <- X$depth / X$zsd # add secchi/depth for a variable representing seafloor light level
 X$light_bottom <- exp(-1.7*X$depth / X$zsd)
+X <- X[,-which(colnames(X) == "zsd")] #remove secchi depth since it is not interesting for modeling in itself
+
 X.scaled <- scale_covariates(X)
 ### add the second order terms
 X.sec_ord <- add_second_order_terms(X.scaled,colnames(X.scaled))
@@ -42,32 +53,42 @@ colnames(pred_grid_1km_2021_july_df)
 
 predictive_grid <- vect("data/estonia_new/predictive_grid_1km_all_variables_2021_july/predictive_grid_1km_all_variables_2021_july.shp")
 
-# initialize loo table
-loo_table <- c()
-
 # loop over the species, save the models
 sp_names <- colnames(train)[20:35]
 n_chains <- 4
-n_iter <- 50
-for (sp_name in sp_names[11:16]) {
-  y <- train[,sp_name]
-  y.01 <- y/100
+n_iter <- 1000
+subfolder <- paste0("n_",nrow(X))
+
+model_subfolder <- "" # model where rho is fixed
+model_subfolder <- "scaled_sigmoid/" # model where log(rho) = a + XB w/ second order terms
+
+stan_file_loc <- paste0("stan_files/",model_subfolder,"left_censored_beta_regression.stan")
+
+for (model_subfolder in c("","scaled_sigmoid/")) {
   
-  dat.beta <- list(N = nrow(X.sec_ord),
-                         n_var = ncol(X.sec_ord),
-                         y = y.01,
-                         X = X.sec_ord,
-                         a = 1)
+  stan_file_loc <- paste0("stan_files/",model_subfolder,"left_censored_beta_regression.stan")
   
-  mod.beta <- stan("stan_files/left_censored_beta_regression.stan", data = dat.beta, chains = n_chains, iter = n_iter, seed = 42,
-                         pars = c("mu"), include = FALSE)
-  
-  sp_name_modified <- gsub(" ","_",sp_name)
-  sp_name_modified <- gsub("/","_",sp_name_modified)
-  
-  f_name <- paste0("models/M1/",sp_name_modified,".rds")
-  
-  saveRDS(mod.beta, f_name)
+  for (sp_name in sp_names[15]) {
+    y <- train[,sp_name]
+    y.01 <- y/100
+    
+    dat.beta <- list(N = nrow(X.sec_ord),
+                           n_var = ncol(X.sec_ord),
+                           y = y.01,
+                           X = X.sec_ord,
+                           a = 1)
+    
+    mod.beta <- stan(stan_file_loc,
+                     data = dat.beta, chains = n_chains, iter = n_iter, seed = 42,
+                           pars = c("mu"), include = FALSE)
+    
+    sp_name_modified <- gsub(" ","_",sp_name)
+    sp_name_modified <- gsub("/","_",sp_name_modified)
+    
+    f_name <- paste0("models/",model_subfolder,subfolder,"/M1/",sp_name_modified,".rds")
+    
+    saveRDS(mod.beta, f_name)
+  }
 }
 
 ############################ TEST AREA ###################################

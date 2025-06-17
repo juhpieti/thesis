@@ -125,57 +125,57 @@ plot_distributions <- function(stan_fit,X,is_iid_noise=FALSE,plot_nx=3,plot_ny=3
   }
 }
 
-plot_responses <- function(stan_fit, X.train, X.orig, is_standardized = TRUE, second_order = FALSE, xmin=-3, xmax=3, ymin=0, ymax=1, plot_nx=3, plot_ny=3) {
-  ###
-  # xmin: min depth
-  # xmax: max depth
-  
-  alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
-  beta_sam <- as.matrix(stan_fit, pars = c("beta_1","beta_2"))
-  
-  ### response curves
-  par(mfrow = c(plot_nx,plot_ny))
-  
-  ### remove the second order terms since they will be recreated for prediction values
-  if (second_order) {
-    X.train <- X.train[,-grep("\\^2", colnames(X.train))]
-  }
-  
-  ### prepare a grid matrix
-  depth_idx <- which(colnames(X.train) == "depth")
-  x_grid <- c()
-  for (i in 1:ncol(X.train)) {
-    #x_grid <- cbind(x_grid, seq(0,100,length=500))
-    x_grid <- cbind(x_grid, seq(min(X.orig[,i]),max(X.orig[,i]),length=500))
-  }
-  #x_grid[,depth_idx] <- seq(xmin,xmax,length=500)
-  x_grid_orig <- x_grid
-  
-  ### scale if the X.train also standardized
-  if (is_standardized) {
-    x_grid <- scale_covariates(X.orig,x_grid)
-  }
-  
-  colnames(x_grid) <- colnames(X.train)
-  x_grid <- as.data.frame(x_grid)
-  
-  ### add second order if they are in the model
-  if (second_order) {
-    x_grid <- add_second_order_terms(x_grid, colnames(x_grid))
-  }
-  
-  for (i in 1:ncol(X.train)) {
-    var_name <- colnames(X.train)[i]
-    f <- mean(alpha_sam) + x_grid[,i] * mean(beta_sam[,i])
-    if (second_order) {
-      f <- f + x_grid[,i+ncol(X.train)] * mean(beta_sam[,i+ncol(X.train)])
-    }
-    
-    plot(x_grid_orig[,i],inv_logit(f),type="l",
-         ylab="prob. of occ.",xlab="standardized value",
-         main=colnames(X.train)[i],ylim = c(ymin,ymax))
-  }
-}
+# plot_responses <- function(stan_fit, X.train, X.orig, is_standardized = TRUE, second_order = FALSE, xmin=-3, xmax=3, ymin=0, ymax=1, plot_nx=3, plot_ny=3) {
+#   ###
+#   # xmin: min depth
+#   # xmax: max depth
+#   
+#   alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
+#   beta_sam <- as.matrix(stan_fit, pars = c("beta_1","beta_2"))
+#   
+#   ### response curves
+#   par(mfrow = c(plot_nx,plot_ny))
+#   
+#   ### remove the second order terms since they will be recreated for prediction values
+#   if (second_order) {
+#     X.train <- X.train[,-grep("\\^2", colnames(X.train))]
+#   }
+#   
+#   ### prepare a grid matrix
+#   depth_idx <- which(colnames(X.train) == "depth")
+#   x_grid <- c()
+#   for (i in 1:ncol(X.train)) {
+#     #x_grid <- cbind(x_grid, seq(0,100,length=500))
+#     x_grid <- cbind(x_grid, seq(min(X.orig[,i]),max(X.orig[,i]),length=500))
+#   }
+#   #x_grid[,depth_idx] <- seq(xmin,xmax,length=500)
+#   x_grid_orig <- x_grid
+#   
+#   ### scale if the X.train also standardized
+#   if (is_standardized) {
+#     x_grid <- scale_covariates(X.orig,x_grid)
+#   }
+#   
+#   colnames(x_grid) <- colnames(X.train)
+#   x_grid <- as.data.frame(x_grid)
+#   
+#   ### add second order if they are in the model
+#   if (second_order) {
+#     x_grid <- add_second_order_terms(x_grid, colnames(x_grid))
+#   }
+#   
+#   for (i in 1:ncol(X.train)) {
+#     var_name <- colnames(X.train)[i]
+#     f <- mean(alpha_sam) + x_grid[,i] * mean(beta_sam[,i])
+#     if (second_order) {
+#       f <- f + x_grid[,i+ncol(X.train)] * mean(beta_sam[,i+ncol(X.train)])
+#     }
+#     
+#     plot(x_grid_orig[,i],inv_logit(f),type="l",
+#          ylab="prob. of occ.",xlab="standardized value",
+#          main=colnames(X.train)[i],ylim = c(ymin,ymax))
+#   }
+# }
 
 # plot_responses_hanko <- function(stan_fit, X.train, X.orig, is_standardized = TRUE, is_iid_noise = FALSE, ymin=0, ymax=1, plot_nx=3, plot_ny=3) {
 #   
@@ -325,20 +325,26 @@ plot_responses_binomial_regression <- function(stan_fit, X.train, X.orig, is_sta
 ####################################################################################################################################
 
 integrate_LC_beta <- function(mu,rho,a) {
+  rho = max(rho,0.1) # integration crashes with very small rho
   if (mu >= 0.9975) { # integration crashes if lots of mass near 1
     return(0.9975)
-  } else {
-    calc_density <- function(x) (x*dbeta((x+a)/(a+1),mu*rho,(1-mu)*rho)/(a+1))
   }
+  if ((mu > 0.99) & (rho < 0.25)) { # again large mu with small rho fails integral (explodes in the right end)
+    return(0.995)
+  }
+  calc_density <- function(x) (x*dbeta((x+a)/(a+1),mu*rho,(1-mu)*rho)/(a+1))
   return(integrate(calc_density,0,1)$value)
 }
 
 integrate_ZI_LC_beta <- function(mu,pi,rho,a) {
+  rho = max(rho,0.1) # integration crashes with very small rho
   if (mu >= 0.995) { # integration crashes if lots of mass near 1
     return(pi*0.995)
-  } else {
-    calc_density <- function(x) (x*pi*dbeta((x+a)/(a+1),mu*rho,(1-mu)*rho)/(a+1))
   }
+  if  ((mu > 0.99) & (rho < 0.25)) { #integration crashes if mean is high and rho is small (explodes in the right end)
+    return(pi*0.995)
+  }
+  calc_density <- function(x) (x*pi*dbeta((x+a)/(a+1),mu*rho,(1-mu)*rho)/(a+1))
   return(integrate(calc_density,0,1)$value)
 }
 
@@ -350,15 +356,25 @@ calculate_probzero_ZI_LC_beta <- function(mu,pi,rho,a) {
   return(1-pi + pi*pbeta(a/(a+1),mu*rho,(1-mu)*rho))
 }
 
-predict_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, a = 1) {
+predict_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, a = 1, rho_modeled = FALSE, C = 1000) {
   ### X.pred: prediction matrix (mxp)
   ### X.orig: non-scaled data matrix (nxp) to learn about the scaling parameters
+  ### thinning: use every thinning:th posterior sample in predictions
+  ### a: left-censoring coefficient
+  ### rho_modeled: TRUE: rho modeled with covariates, FALSE: common rho
+  ### C: if rho modeled, what is it's upper limit? rho = C*inv_logit(a+XB)
   ### RETURNS rep x m matrix of samples from posterior predictive for latent f
   
   # posterior samples
   alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
   beta_sam <- as.matrix(stan_fit, pars = c("beta_1","beta_2"))
-  rho_sam <- as.matrix(stan_fit, pars = c("rho"))
+  
+  if (rho_modeled) {
+    alpha_rho_sam <- as.matrix(stan_fit, pars = c("alpha_rho"))
+    beta_rho_sam <- as.matrix(stan_fit, pars = c("beta_rho_1","beta_rho_2"))
+  } else {
+    rho_sam <- as.matrix(stan_fit, pars = c("rho"))
+  }
   
   # prepare prediction matrix
   X.pred.scaled <- scale_covariates(X.orig,X.pred)
@@ -370,13 +386,21 @@ predict_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, a =
   y_sam <- c()
   EY_sam <- c()
   probzero_sam <- c()
+  rho_sample <- c()
   
   # loop over posterior samples
   for (i in seq(1,nrow(beta_sam),thinning)) {
     alpha_i <- alpha_sam[i,]
     beta_i <- beta_sam[i,]
-    rho_i <- rho_sam[i,]
     
+    if (rho_modeled){
+      rho_i <- C*inv_logit(as.vector(alpha_rho_sam[i,]  + Xpred %*% beta_rho_sam[i,]))
+    } else {
+      rho_i <- rep(rho_sam[i,], nrow(Xpred)) # every location has common rho
+    }
+    
+    rho_sample <- rbind(rho_sample,rho_i)
+
     # latent f
     f_i <- as.vector(alpha_i + Xpred %*% beta_i)
     f_sam <- rbind(f_sam,f_i)
@@ -386,8 +410,10 @@ predict_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, a =
     # calculate expectations and probability of zeroes
     
     ### faster way to accomplish what was done within loop
-    EYi <- sapply(mu_i,integrate_LC_beta,rho=rho_i,a=a)
-    probzero_i <- sapply(mu_i,calculate_probzero_LC_beta,rho=rho_i,a=a)
+    #EYi <- sapply(mu_i,integrate_LC_beta,rho=rho_i,a=a)
+    EYi <- mapply(integrate_LC_beta,mu=mu_i,rho=rho_i, MoreArgs = list(a=a))
+    #probzero_i <- sapply(mu_i,calculate_probzero_LC_beta,rho=rho_i,a=a)
+    probzero_i <- mapply(calculate_probzero_LC_beta, mu=mu_i, rho=rho_i, MoreArgs = list(a=a))
 
     #save
     EY_sam <- rbind(EY_sam,EYi)
@@ -404,12 +430,17 @@ predict_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, a =
               y_sam = y_sam,
               EY_sam = EY_sam,
               probzero_sam = probzero_sam,
-              rho_sam = rho_sam[seq(1,nrow(beta_sam),thinning), ]))
+              rho_sample = rho_sample))
+              #rho_sam = rho_sam[seq(1,nrow(beta_sam),thinning), ]))
 }
 
-predict_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, a = 1) {
+predict_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, a = 1, rho_modeled = FALSE, C = 1000) {
   ### X.pred: prediction matrix (mxp)
   ### X.orig: non-scaled data matrix (nxp) to learn about the scaling parameters
+  ### thinning: use every thinning:th posterior sample in predictions
+  ### a: left-censoring coefficient
+  ### rho_modeled: TRUE: rho modeled with covariates, FALSE: common rho
+  ### C: if rho modeled, what is it's upper limit? rho = C*inv_logit(a+XB)
   ### RETURNS rep x m matrix of samples from posterior predictive for latent f
   
   # posterior samples
@@ -417,8 +448,14 @@ predict_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, 
   alpha_pi_sam <- as.matrix(stan_fit, pars = c("alpha_pi"))
   beta_sam <- as.matrix(stan_fit, pars = c("beta_1","beta_2"))
   beta_pi_sam <- as.matrix(stan_fit, pars = c("beta_pi_1","beta_pi_2"))
-  rho_sam <- as.matrix(stan_fit, pars = c("rho"))
   
+  if (rho_modeled) {
+    alpha_rho_sam <- as.matrix(stan_fit, pars = c("alpha_rho"))
+    beta_rho_sam <- as.matrix(stan_fit, pars = c("beta_rho_1","beta_rho_2"))
+  } else {
+    rho_sam <- as.matrix(stan_fit, pars = c("rho"))
+  }
+
   # prepare prediction matrix
   X.pred.scaled <- scale_covariates(X.orig,X.pred)
   Xpred <- add_second_order_terms(X.pred.scaled, colnames(X.pred))
@@ -431,6 +468,7 @@ predict_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, 
   probzero_sam <- c()
   prob_suit_sam <- c()
   EY_if_suitable_sam <- c()
+  rho_sample <- c()
   
   # loop over posterior samples
   for (i in seq(1,nrow(beta_sam),thinning)) {
@@ -438,8 +476,15 @@ predict_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, 
     alpha_pi_i <- alpha_pi_sam[i,]
     beta_i <- beta_sam[i,]
     beta_pi_i <- beta_pi_sam[i,]
-    rho_i <- rho_sam[i,]
     
+    if (rho_modeled){
+      rho_i <- C*inv_logit(as.vector(alpha_rho_sam[i,]  + Xpred %*% beta_rho_sam[i,]))
+    } else {
+      rho_i <- rep(rho_sam[i,], nrow(Xpred)) # every location has common rho
+    }
+    
+    rho_sample <- rbind(rho_sample, rho_i)
+
     # latent f for mean of beta
     f_i <- as.vector(alpha_i + Xpred %*% beta_i)
     f_sam <- rbind(f_sam,f_i)
@@ -454,11 +499,9 @@ predict_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, 
     
     
     # calculate expectations and probability of zeroes
-
-    ### faster way to accomplish what was done within loop
-    EYi <- mapply(integrate_ZI_LC_beta,mu=mu_i,pi=pi_i, MoreArgs = list(rho=rho_i,a=a))
-    EYi_if_suitable <- sapply(mu_i,integrate_LC_beta,rho=rho_i,a=a)
-    probzero_i <- mapply(calculate_probzero_ZI_LC_beta,mu=mu_i,pi=pi_i, MoreArgs = list(rho=rho_i,a=a))
+    EYi <- mapply(integrate_ZI_LC_beta,mu=mu_i,pi=pi_i,rho=rho_i, MoreArgs = list(a=a))
+    EYi_if_suitable <- mapply(integrate_LC_beta,mu=mu_i,rho=rho_i, MoreArgs = list(a=a))
+    probzero_i <- mapply(calculate_probzero_ZI_LC_beta,mu=mu_i,pi=pi_i,rho=rho_i, MoreArgs = list(a=a))
     
     #save
     EY_sam <- rbind(EY_sam,EYi)
@@ -480,7 +523,8 @@ predict_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, 
               probzero_sam = probzero_sam,
               prob_suit_sam = prob_suit_sam,
               EY_if_suitable_sam = EY_if_suitable_sam,
-              rho_sam = rho_sam[seq(1,nrow(beta_sam),thinning), ]))
+              rho_sample = rho_sample))#,
+              #rho_sam = rho_sam[seq(1,nrow(beta_sam),thinning), ]))
 }
 
 prepare_P_matrix <- function(pred.locations, grid_center.locations) {
@@ -500,7 +544,7 @@ prepare_P_matrix <- function(pred.locations, grid_center.locations) {
   return(P)
 }
 
-predict_spatial_beta_regression <- function(stan_fit, X.pred, X.orig, pred.locations, S.pred, S.obs, thinning = 10, a = 1) {
+predict_spatial_beta_regression <- function(stan_fit, X.pred, X.orig, pred.locations, S.pred, S.obs, thinning = 10, a = 1, rho_modeled = FALSE, C = 1000) {
   ### X.pred: prediction matrix (mxp)
   ### X.orig: non-scaled data matrix (nxp) to learn about the scaling parameters
   # pred.locations: locations for each prediction cell (in meters)
@@ -511,7 +555,14 @@ predict_spatial_beta_regression <- function(stan_fit, X.pred, X.orig, pred.locat
   # posterior samples
   alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
   beta_sam <- as.matrix(stan_fit, pars = c("beta_1","beta_2"))
-  rho_sam <- as.matrix(stan_fit, pars = c("rho"))
+  
+  if (rho_modeled) {
+    alpha_rho_sam <- as.matrix(stan_fit, pars = c("alpha_rho"))
+    beta_rho_sam <- as.matrix(stan_fit, pars = c("beta_rho_1","beta_rho_2"))
+  } else {
+    rho_sam <- as.matrix(stan_fit, pars = c("rho"))
+  }
+  
   phi_sam <- as.matrix(stan_fit, pars = c("phi"))
   l_sam <- as.matrix(stan_fit, pars = c("l"))
   s2_sam <- as.matrix(stan_fit, pars = c("s2_cf"))
@@ -530,13 +581,21 @@ predict_spatial_beta_regression <- function(stan_fit, X.pred, X.orig, pred.locat
   y_sam <- c()
   EY_sam <- c()
   probzero_sam <- c()
+  rho_sample <- c()
   
   # loop over posterior samples
   for (i in seq(1,nrow(beta_sam),thinning)) {
     alpha_i <- alpha_sam[i,]
     beta_i <- beta_sam[i,]
-    rho_i <- rho_sam[i,]
     
+    if (rho_modeled){
+      rho_i <- C*inv_logit(as.vector(alpha_rho_sam[i,]  + Xpred %*% beta_rho_sam[i,]))
+    } else {
+      rho_i <- rep(rho_sam[i,], nrow(Xpred)) # every location has common rho
+    }
+    
+    rho_sample <- rbind(rho_sample, rho_i)
+
     # latent f
     f_i <- as.vector(alpha_i + Xpred %*% beta_i)
     
@@ -575,8 +634,10 @@ predict_spatial_beta_regression <- function(stan_fit, X.pred, X.orig, pred.locat
     # calculate expectations and probability of zeroes
     
     ### faster way to accomplish what was done within loop
-    EYi <- sapply(mu_i,integrate_LC_beta,rho=rho_i,a=a)
-    probzero_i <- sapply(mu_i,calculate_probzero_LC_beta,rho=rho_i,a=a)
+    #EYi <- sapply(mu_i,integrate_LC_beta,rho=rho_i,a=a)
+    EYi <- mapply(integrate_LC_beta, mu=mu_i,rho=rho_i, MoreArgs = list(a=a))
+    probzero_i <- mapply(calculate_probzero_LC_beta, mu=mu_i, rho=rho_i, MoreArgs = list(a=a))
+    #probzero_i <- sapply(mu_i,calculate_probzero_LC_beta,rho=rho_i,a=a)
     
     #save
     EY_sam <- rbind(EY_sam,EYi)
@@ -593,11 +654,11 @@ predict_spatial_beta_regression <- function(stan_fit, X.pred, X.orig, pred.locat
               y_sam = y_sam,
               EY_sam = EY_sam,
               probzero_sam = probzero_sam,
-              rho_sam = rho_sam[seq(1,nrow(beta_sam),thinning), ],
-              phi_pred_sam = phi_pred_sam))
+              phi_mu_pred_sam = phi_pred_sam,
+              rho_sample = rho_sample))
 }
 
-predict_spatial_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, pred.locations, S.pred, S.obs, thinning = 10, a = 1) {
+predict_spatial_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, pred.locations, S.pred, S.obs, thinning = 10, a = 1, rho_modeled = FALSE, C = 1000) {
   ### X.pred: prediction matrix (mxp)
   ### X.orig: non-scaled data matrix (nxp) to learn about the scaling parameters
   # pred.locations: locations for each prediction cell (in meters)
@@ -613,7 +674,12 @@ predict_spatial_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, pred.lo
   beta_pi_sam <- as.matrix(stan_fit, pars = c("beta_pi_1","beta_pi_2"))
   
   # dispersion parameter for beta distribution
-  rho_sam <- as.matrix(stan_fit, pars = c("rho"))
+  if (rho_modeled) {
+    alpha_rho_sam <- as.matrix(stan_fit, pars = c("alpha_rho"))
+    beta_rho_sam <- as.matrix(stan_fit, pars = c("beta_rho_1","beta_rho_2"))
+  } else {
+    rho_sam <- as.matrix(stan_fit, pars = c("rho"))
+  }
   
   # spatial random effects
   phi_sam <- as.matrix(stan_fit, pars = c("phi_mu"))
@@ -643,6 +709,7 @@ predict_spatial_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, pred.lo
   EY_if_suitable_sam <- c()
   phi_mu_pred_sam <- c()
   phi_pi_pred_sam <- c()
+  rho_sample <- c()
   
   # loop over posterior samples
   for (i in seq(1,nrow(beta_sam),thinning)) {
@@ -650,7 +717,14 @@ predict_spatial_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, pred.lo
     alpha_pi_i <- alpha_pi_sam[i,]
     beta_i <- beta_sam[i,]
     beta_pi_i <- beta_pi_sam[i,]
-    rho_i <- rho_sam[i,]
+    
+    if (rho_modeled){
+      rho_i <- C*inv_logit(as.vector(alpha_rho_sam[i,]  + Xpred %*% beta_rho_sam[i,]))
+    } else {
+      rho_i <- rep(rho_sam[i,], nrow(Xpred)) # every location has common rho
+    }
+    
+    rho_sample <- rbind(rho_sample, rho_i)
     
     ### 1) construct f for mean of the beta distribution
     f_i <- as.vector(alpha_i + Xpred %*% beta_i)
@@ -725,9 +799,10 @@ predict_spatial_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, pred.lo
     ### 3) calculate expectations and probability of zeroes
     
     ### faster way to accomplish what was done within loop
-    EYi <- mapply(integrate_ZI_LC_beta,mu=mu_i,pi=pi_i, MoreArgs = list(rho=rho_i,a=a))
-    EYi_if_suitable <- sapply(mu_i,integrate_LC_beta,rho=rho_i,a=a)
-    probzero_i <- mapply(calculate_probzero_ZI_LC_beta,mu=mu_i,pi=pi_i, MoreArgs = list(rho=rho_i,a=a))
+    EYi <- mapply(integrate_ZI_LC_beta,mu=mu_i,pi=pi_i,rho=rho_i, MoreArgs = list(a=a))
+    #EYi_if_suitable <- sapply(mu_i,integrate_LC_beta,rho=rho_i,a=a)
+    EYi_if_suitable <- mapply(integrate_LC_beta,mu=mu_i,rho=rho_i, MoreArgs = list(a=a))
+    probzero_i <- mapply(calculate_probzero_ZI_LC_beta,mu=mu_i,pi=pi_i,rho=rho_i, MoreArgs = list(a=a))
     
     #save
     EY_sam <- rbind(EY_sam,EYi)
@@ -749,12 +824,270 @@ predict_spatial_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, pred.lo
               probzero_sam = probzero_sam,
               prob_suit_sam = prob_suit_sam,
               EY_if_suitable_sam = EY_if_suitable_sam,
-              rho_sam = rho_sam[seq(1,nrow(beta_sam),thinning), ],
               phi_mu_pred_sam = phi_mu_pred_sam,
-              phi_pi_pred_sam = phi_pi_pred_sam))
+              phi_pi_pred_sam = phi_pi_pred_sam,
+              rho_sample = rho_sample))
 }
   
 
+plot_and_save_responses <- function(mod_list,X,grid_length = 200,im_width,im_height,thinning=200) {
+  
+  grid_matrix <- matrix(0,nrow = grid_length, ncol = ncol(X))
+  for (i in 1:ncol(X)) {
+    x_grid <- seq(min(X[,i]),max(X[,i]),length=grid_length)
+    grid_matrix[,i] <- x_grid
+  }
+  colnames(grid_matrix) <- colnames(X)
+  
+  colmeans_matrix <- matrix(rep(colMeans(X),grid_length), nrow = grid_length, byrow = TRUE)
+  colnames(colmeans_matrix) <- colnames(X)
+  
+  post.mean_list <- list() #list with n_model components, each are grid_length x p matrices
+  prob.zero_list <- list() #same for probability of zero
+  
+  mod_idx <- 1
+  subfolder <- paste0("n_",nrow(X))
+  for(mod in mod_list) {
+    # save the posterior means
+    post.mean_mat <- c() #grid_length x p matrix 
+    prob.zero_mat <- c()
+    
+    # save all the predictions for current model
+    all_vars_preds <- list() #list with p components, each n_rep x grid_length
+    
+    ### plots for separate curves if ZI model
+    if (mod_idx %in% c(2,4)) {
+      png(paste0("plots/final_results/",subfolder,"/M",mod_idx,"/separate_curves/",sp_name_modified,".png"), width = im_width, height = im_height)
+      par(mfrow = c(3,3),
+          mar = c(5,4,2,2))
+    }
+    
+    for (i in 1:ncol(X)) {
+      predX <- colmeans_matrix # take all the variables to their mean in the training data
+      predX[,i] <- grid_matrix[,i] # replace one covariate by grid
+      predX <- as.data.frame(predX)
+      if (mod_idx %in% c(1,3)) {
+        res <- predict_beta_regression(mod,predX,X,thinning,1)
+      } else {
+        res <- predict_ZI_beta_regression(mod,predX,X,thinning,1)
+      }
+      res.EY <- res$EY_sam # n_rep x grid_length
+      all_vars_preds[[colnames(X)[i]]] <- res.EY
+      post.means <- colMeans(res.EY)
+      
+      #plot the probability of presences and expectation given presence
+      if (mod_idx %in% c(2,4)) {
+        
+        pi <- colMeans(res$prob_suit_sam)
+        EY_if_suitable <- colMeans(res$EY_if_suitable_sam)
+        
+        plot(grid_matrix[,i],pi,col="blue",lty=1,ylim=c(0,1), main = colnames(X)[i],type="l")
+        lines(grid_matrix[,i],EY_if_suitable,col="red",lty=1)
+        if (i == 1){
+          legend("bottomright", legend = c("Pr(suitable)","E[Y|suitable]"), lty = 1, col = c("blue","red"), lwd = 1, cex = 1)
+        }
+        # add legend
+        #plot(NULL, xlim = 0:1,ylim=0:1, ylab = "", xlab = "")
+        #legend("center",legend = c("prob. suitable","E[Y|suitable]"), col = c("blue","red"), lty = 1, bty = "n", cex = 1.5)
+      }
+      
+      # save posterior means
+      post.mean_mat <- cbind(post.mean_mat, post.means)
+      prob.zero_mat <- cbind(prob.zero_mat, colMeans(res$probzero_sam))
+    }
+    
+    if (mod_idx %in% c(2,4)) {
+      dev.off()
+    }
+    
+    # now we want to normalize such that largest posterior men gets value 1!
+    max_post_mean <- max(post.mean_mat)
+    post.mean_mat <- post.mean_mat / max_post_mean #now max value is 1
+    
+    # save scaled posterior means
+    post.mean_list[[mod_idx]] <- post.mean_mat
+    prob.zero_list[[mod_idx]] <- prob.zero_mat
+    
+    # scale also all the other samples
+    all_vars_preds <- lapply(all_vars_preds, function(x) (x/max_post_mean))
+    
+    
+    # draw plots
+    png(paste0("plots/final_results/",subfolder,"/M",mod_idx,"/response_curves/",sp_name_modified,".png"), width = im_width, height = im_height)
+    
+    par(mfrow = c(3,3),
+        mar = c(5,4,2,2))
+    
+    for (i in 1:ncol(X)) { # index for variable
+      plot(NULL, xlim = c(min(grid_matrix[,i]), max(grid_matrix[,i])), ylim = c(0,1.1),
+           xlab = "value", ylab = "relative exp. coverage", main = colnames(X)[i])
+      
+      n_rep <- nrow(res.EY)
+      for (j in 1:n_rep) { # index for sample
+        lines(grid_matrix[,i],all_vars_preds[[i]][j,], col = "lightgrey", lwd = 0.8)
+      }
+      lines(grid_matrix[,i], post.mean_mat[,i], col = "black", lwd = 1)
+    }
+    
+    dev.off()
+    
+    mod_idx <- mod_idx + 1
+  }
+  
+  ### then also plot the colmeans on the same plot
+  cols <- rainbow(length(post.mean_list))
+  #cols <- c("red","royalblue","forestgreen","yellow2")
+  
+  png(paste0("plots/final_results/",subfolder,"/response_curves/",sp_name_modified,".png"), width = im_width, height = im_height)
+  par(mfrow = c(3,3),
+      mar = c(5,4,2,2))
+  for (i in 1:ncol(X)) {
+    plot(NULL, xlim = c(min(grid_matrix[,i]), max(grid_matrix[,i])), ylim = c(0,1.1),
+         xlab = "value", ylab = "relative exp. coverage", main = colnames(X)[i], lwd = 1)
+    for (j in 1:length(post.mean_list)) {
+      lines(grid_matrix[,i],post.mean_list[[j]][,i], col = cols[j], lwd = 1)
+    }
+    if (i == 1){
+      legend("topright", legend = c("base","RE","ZI","ZI+RE"), lty = 1, col = cols, lwd = 1, cex = 1)
+    }
+  }
+  #plot(NULL, xlim = 0:1,ylim=0:1, ylab = "", xlab = "")
+  #legend("center", legend = c("base","RE","ZI","ZI+RE"), lty = 1, col = cols, lwd = 1, cex = 1.5, bty = "n")
+  dev.off()
+  
+  ### same for probability of zero?
+  png(paste0("plots/final_results/",subfolder,"/prob_zero_curves/",sp_name_modified,".png"), width = im_width, height = im_height)
+  par(mfrow = c(3,3),
+      mar = c(5,4,2,2))
+  
+  cols <- rainbow(length(prob.zero_list))
+  #cols <- c("red","royalblue","forestgreen","yellow2")
+  for (i in 1:ncol(X)) {
+    plot(NULL, xlim = c(min(grid_matrix[,i]), max(grid_matrix[,i])), ylim = c(0,1.1),
+         xlab = "value", ylab = "prob. of zero", main = colnames(X)[i], lwd = 1)
+    for (j in 1:length(prob.zero_list)) {
+      lines(grid_matrix[,i],prob.zero_list[[j]][,i], col = cols[j], lwd = 1)
+    }
+    if (i == 1){
+      legend("topright", legend = c("base","RE","ZI","ZI+RE"), lty = 1, col = cols, lwd = 1, cex = 1)
+    }
+  }
+  #plot(NULL, xlim = 0:1,ylim=0:1, ylab = "", xlab = "")
+  #legend("center", legend = c("base","RE","ZI","ZI+RE"), lty = 1, col = cols, lwd = 1, cex = 1.5, bty = "n")
+  dev.off()
+}
+
+plot_responses <- function(mod,X,grid_length = 200,mod_idx,rho_modeled=FALSE,C=1000,thinning=200) {
+  ### mod_idx = 1,2,3 or 4 (base,ZI,RE,RE+ZI)
+  
+  ### create a matrix that includes a grid from min to max observed values for each covariate
+  grid_matrix <- matrix(0,nrow = grid_length, ncol = ncol(X))
+  for (i in 1:ncol(X)) {
+    x_grid <- seq(min(X[,i]),max(X[,i]),length=grid_length)
+    grid_matrix[,i] <- x_grid
+  }
+  colnames(grid_matrix) <- colnames(X)
+  
+  ### create a matrix that just repeats the mean value of each covariate
+  colmeans_matrix <- matrix(rep(colMeans(X),grid_length), nrow = grid_length, byrow = TRUE)
+  colnames(colmeans_matrix) <- colnames(X)
+  
+  # save the posterior means
+  post.mean_mat <- c() #grid_length x p matrix 
+  prob.zero_mat <- c()
+  
+  # save all the predictions for current model
+  all_vars_preds <- list() #list with p components, each n_rep x grid_length
+  
+  ### plots for separate curves if ZI model
+  if (mod_idx %in% c(2,4)) {
+    par(mfrow = c(3,3),
+        mar = c(5,4,2,2))
+  }
+  
+  for (i in 1:ncol(X)) {
+    predX <- colmeans_matrix # take all the variables to their mean in the training data
+    predX[,i] <- grid_matrix[,i] # replace one covariate by corresponding grid
+    predX <- as.data.frame(predX)
+    
+    if (mod_idx %in% c(1,3)) {
+      res <- predict_beta_regression(mod,predX,X,thinning,a=1,rho_modeled=rho_modeled,C=C)
+    } else {
+      res <- predict_ZI_beta_regression(mod,predX,X,thinning,a=1,rho_modeled=rho_modeled,C=C)
+    }
+    
+    res.EY <- res$EY_sam # n_rep x grid_length
+    all_vars_preds[[colnames(X)[i]]] <- res.EY
+    post.means <- colMeans(res.EY)
+    
+    #plot the probability of presences and expectation given presence
+    if (mod_idx %in% c(2,4)) {
+      
+      pi <- colMeans(res$prob_suit_sam)
+      EY_if_suitable <- colMeans(res$EY_if_suitable_sam)
+      
+      plot(grid_matrix[,i],pi,col="blue",lty=1,ylim=c(0,1), main = colnames(X)[i],type="l")
+      lines(grid_matrix[,i],EY_if_suitable,col="red",lty=1)
+      if (i == 1){
+        legend("bottomright", legend = c("Pr(suitable)","E[Y|suitable]"), lty = 1, col = c("blue","red"), lwd = 1, cex = 1)
+      }
+      # add legend
+      #plot(NULL, xlim = 0:1,ylim=0:1, ylab = "", xlab = "")
+      #legend("center",legend = c("prob. suitable","E[Y|suitable]"), col = c("blue","red"), lty = 1, bty = "n", cex = 1.5)
+    }
+    
+    # save posterior means
+    post.mean_mat <- cbind(post.mean_mat, post.means)
+    prob.zero_mat <- cbind(prob.zero_mat, colMeans(res$probzero_sam))
+  }
+  
+  # # now we want to normalize such that largest posterior men gets value 1!
+  # max_post_mean <- max(post.mean_mat)
+  # post.mean_mat <- post.mean_mat / max_post_mean #now max value is 1
+  # 
+  # # save scaled posterior means
+  # #post.mean_list[[mod_idx]] <- post.mean_mat
+  # #prob.zero_list[[mod_idx]] <- prob.zero_mat
+  # 
+  # # scale also all the other samples
+  # all_vars_preds <- lapply(all_vars_preds, function(x) (x/max_post_mean))
+  # 
+  # 
+  # # draw plots
+  # 
+  # par(mfrow = c(3,3),
+  #     mar = c(5,4,2,2))
+  # 
+  # for (i in 1:ncol(X)) { # index for variable
+  #   plot(NULL, xlim = c(min(grid_matrix[,i]), max(grid_matrix[,i])), ylim = c(0,1.1),
+  #        xlab = "value", ylab = "relative exp. coverage", main = colnames(X)[i])
+  #   
+  #   n_rep <- nrow(res.EY)
+  #   for (j in 1:n_rep) { # index for sample
+  #     lines(grid_matrix[,i],all_vars_preds[[i]][j,], col = "lightgrey", lwd = 0.8)
+  #   }
+  #   lines(grid_matrix[,i], post.mean_mat[,i], col = "black", lwd = 1)
+  # }
+}
+
+
+plot_responses_one_model <- function(mod,X,grid_length = 200,mod_idx,rho_modeled=FALSE,C=1000,thinning=200) {
+  ### create a matrix that includes a grid from min to max observed values for each covariate
+  grid_matrix <- matrix(0,nrow = grid_length, ncol = ncol(X))
+  for (i in 1:ncol(X)) {
+    x_grid <- seq(min(X[,i]),max(X[,i]),length=grid_length)
+    grid_matrix[,i] <- x_grid
+  }
+  colnames(grid_matrix) <- colnames(X)
+  
+  ### create a matrix that just repeats the mean value of each covariate
+  colmeans_matrix <- matrix(rep(colMeans(X),grid_length), nrow = grid_length, byrow = TRUE)
+  colnames(colmeans_matrix) <- colnames(X)
+  
+  
+}
+  
+  
 plot_responses_beta_regression <- function(stan_fit, X.train, X.orig, is_standardized = TRUE, second_order = TRUE, xmin=-3, xmax=3, ymin=0, ymax=1,
                                            plot_nx=3, plot_ny=3,a=1,type="expectation") {
   ###

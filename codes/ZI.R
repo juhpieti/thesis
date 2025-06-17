@@ -19,7 +19,15 @@ rstan_options(auto_write = TRUE)
 source("codes/helpers.R")
 
 # load in the training data
-load("data/estonia_new/train_2020_2021.Rdata")
+load("data/estonia_new/train/train_2020_2021_n500.Rdata") # should be identical to the upper one
+df_sub <- train_n500
+
+load("data/estonia_new/train/train_2020_2021_n1000.Rdata")
+df_sub <- train_n1000
+
+load("data/estonia_new/train/train_2020_2021_n2000.Rdata")
+df_sub <- train_n2000
+
 colnames(df_sub)
 colSums(df_sub[,20:38] > 0)
 
@@ -29,6 +37,10 @@ train <- train[,!(colnames(train) %in% c("Furcellaria lumbricalis loose form","T
 
 # prepare the covariate matrix
 X <- train[,11:19]
+#X$depth_to_secchi <- X$depth / X$zsd # add secchi/depth for a variable representing seafloor light level
+X$light_bottom <- exp(-1.7*X$depth / X$zsd)
+X <- X[,-which(colnames(X) == "zsd")] #remove secchi depth since it is not interesting for modeling in itself
+
 X.scaled <- scale_covariates(X)
 ### add the second order terms
 X.sec_ord <- add_second_order_terms(X.scaled,colnames(X.scaled))
@@ -47,26 +59,58 @@ loo_table <- c()
 # loop over the species, save the models
 sp_names <- colnames(train)[20:35]
 n_chains <- 4
-n_iter <- 50
-for (sp_name in sp_names[11:16]) {
-  y <- train[,sp_name]
-  y.01 <- y/100
+n_iter <- 1000
+
+subfolder <- paste0("n_",nrow(X))
+
+model_subfolder <- "" # model where rho is fixed
+model_subfolder <- "rho_with_covariates/" # model where log(rho) = a + XB w/ second order terms
+#model_subfolder <- "inv_rho_prior/"
+model_subfolder <- "scaled_sigmoid/"
+#model_subfolder <- "damgaard"
+model_subfolder <- "hurdle"
+
+stan_file_loc <- paste0("stan_files/",model_subfolder,"zero_inflated_left_censored_beta_regression.stan")
+
+init_list <- list(list(alpha_rho=4.5),list(alpha_rho=5),list(alpha_rho=5.5),list(alpha_rho=6))
+
+init_fun <- function() {
+  return(list(alpha_rho = runif(1,4,6),
+              beta_rho_1 = runif(9,-0.5,0.5),
+              beta_rho_2 = runif(9,-0.2,0.2)))
+}
+
+for (model_subfolder in c("", "scaled_sigmoid/")) {
   
-  dat.beta <- list(N = nrow(X.sec_ord),
-                   n_var = ncol(X.sec_ord),
-                   y = y.01,
-                   X = X.sec_ord,
-                   a = 1)
+  stan_file_loc <- paste0("stan_files/",model_subfolder,"zero_inflated_left_censored_beta_regression.stan")
   
-  mod.ZIbeta <- stan("stan_files/zero_inflated_left_censored_beta_regression.stan",data = dat.beta, chains = n_chains, iter = n_iter, seed = 42,
-                           pars = c("mu","prob_suit"), include = FALSE)
+  for (sp_name in sp_names[15]) {
+    y <- train[,sp_name]
+    y.01 <- y/100
+    
+    dat.beta <- list(N = nrow(X.sec_ord),
+                     n_var = ncol(X.sec_ord),
+                     y = y.01,
+                     X = X.sec_ord,
+                     a = 1)
+    
+    mod.ZIbeta <- stan(stan_file_loc,
+                       data = dat.beta, chains = n_chains, iter = n_iter, seed = 42,
+                       pars = c("mu","prob_suit"), include = FALSE)
+                       #init = init_fun)
+                       #init = init_list,
+                       #init_r=0.1)
+                       #control = list(adapt_delta = 0.95))#, 
+                       #init = "random") # INIT_R IS NECESSARY WHEN INTRODUCING rho=log(a+XB), otherwise cannot calculate gradients at initialization, probably Inf values
   
-  sp_name_modified <- gsub(" ","_",sp_name)
-  sp_name_modified <- gsub("/","_",sp_name_modified)
-  
-  f_name <- paste0("models/M2/",sp_name_modified,".rds")
-  
-  saveRDS(mod.ZIbeta, f_name)
+    
+    sp_name_modified <- gsub(" ","_",sp_name)
+    sp_name_modified <- gsub("/","_",sp_name_modified)
+    
+    f_name <- paste0("models/",model_subfolder,subfolder,"/M2/",sp_name_modified,".rds")
+    
+    saveRDS(mod.ZIbeta, f_name)
+  }
 }
 
 

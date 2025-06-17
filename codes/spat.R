@@ -19,7 +19,12 @@ rstan_options(auto_write = TRUE)
 source("codes/helpers.R")
 
 # load in the training data
-load("data/estonia_new/train_2020_2021.Rdata")
+load("data/estonia_new/train/train_2020_2021_n500.Rdata")
+df_sub <- train_n500
+
+load("data/estonia_new/train/train_2020_2021_n2000.Rdata")
+df_sub <- train_n2000
+
 colnames(df_sub)
 colSums(df_sub[,20:38] > 0)
 
@@ -29,6 +34,10 @@ train <- train[,!(colnames(train) %in% c("Furcellaria lumbricalis loose form","T
 
 # prepare the covariate matrix
 X <- train[,11:19]
+#X$depth_to_secchi <- X$depth / X$zsd # add secchi/depth for a variable representing seafloor light level
+X$light_bottom <- exp(-1.7*X$depth / X$zsd)
+X <- X[,-which(colnames(X) == "zsd")] #remove secchi depth since it is not interesting for modeling in itself
+
 X.scaled <- scale_covariates(X)
 ### add the second order terms
 X.sec_ord <- add_second_order_terms(X.scaled,colnames(X.scaled))
@@ -67,7 +76,7 @@ observed_grid_cells.df <- grid_centers.df[observed_grid_cells,c("x","y")]
 # create the P matrix
 P <- matrix(0,ncol=length(observed_grid_cells),nrow=nrow(train))
 colnames(P) <- rownames(observed_grid_cells.df)
-for (i in 1:nrow(estonia_sub)) {
+for (i in 1:nrow(X)) {
   P[i,as.character(nearest_grid_center.vec[i])] <- 1 
 }
 
@@ -77,32 +86,47 @@ observed_grid_cells.df <- observed_grid_cells.df/1000
 # loop over the species, save the models
 sp_names <- colnames(train)[20:35]
 n_chains <- 4
-n_iter <- 50
-for (sp_name in sp_names[11:16]) {
-  y <- train[,sp_name]
-  y.01 <- y/100
+n_iter <- 1000
+
+subfolder <- paste0("n_",nrow(train))
+
+model_subfolder <- ""
+model_subfolder <- "scaled_sigmoid/"
+
+stan_file_loc <- paste0("stan_files/",model_subfolder,"left_censored_beta_regression_spatial.stan")
+
+for (model_subfolder in c("","scaled_sigmoid/")) {
   
-  dat.beta_spat <- list(N = nrow(X.sec_ord),
-                              n_var = ncol(X.sec_ord),
-                              n_obs_grid = ncol(P),
-                              y = y.01,
-                              X = X.sec_ord,
-                              s = observed_grid_cells.df,
-                              a = 1,
-                              P = P)
+  stan_file_loc <- paste0("stan_files/",model_subfolder,"left_censored_beta_regression_spatial.stan")
   
-  
-  
-  mod.beta_spat <- stan("stan_files/left_censored_beta_regression_spatial.stan", data = dat.beta_spat, chains = n_chains, iter = n_iter, seed = 42,
-                              pars = c("mu","z"), include = FALSE)
-  
-  sp_name_modified <- gsub(" ","_",sp_name)
-  sp_name_modified <- gsub("/","_",sp_name_modified)
-  
-  f_name <- paste0("models/M3/",sp_name_modified,".rds")
-  
-  saveRDS(mod.beta_spat, f_name)
+  for (sp_name in sp_names[4]) {
+    y <- train[,sp_name]
+    y.01 <- y/100
+    
+    dat.beta_spat <- list(N = nrow(X.sec_ord),
+                          n_var = ncol(X.sec_ord),
+                          n_obs_grid = ncol(P),
+                          y = y.01,
+                          X = X.sec_ord,
+                          s = observed_grid_cells.df,
+                          a = 1,
+                          P = P)
+    
+    
+    
+    mod.beta_spat <- stan(stan_file_loc,
+                          data = dat.beta_spat, chains = n_chains, iter = n_iter, seed = 42,
+                          pars = c("mu","z"), include = FALSE)
+    
+    sp_name_modified <- gsub(" ","_",sp_name)
+    sp_name_modified <- gsub("/","_",sp_name_modified)
+    
+    f_name <- paste0("models/",model_subfolder,subfolder,"/M3/",sp_name_modified,".rds")
+    
+    saveRDS(mod.beta_spat, f_name)
+  }
 }
+
 
 ################ from this onwards to analyse_results.R
 

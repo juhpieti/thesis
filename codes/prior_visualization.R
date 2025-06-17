@@ -57,23 +57,43 @@ s2_grid <- seq(0.01,10.01,length=500)
 ### visualize jeffreys
 p_jeffreys <- 1/s2_grid
 p_jeffreys <- p_jeffreys/sum(p_jeffreys)
-plot(NULL, xlim = c(0,5), ylim = c(0,1.5))
-lines(s2_grid, 2*dcauchy(s2_grid,0,sqrt(0.01)),col="red")
+plot(NULL, xlim = c(0,10), ylim = c(0,0.8))
+lines(s2_grid, 2*dcauchy(s2_grid,0,sqrt(0.001)),col="red")
+lines(s2_grid,2*dstudent(s2_grid,2,0,sqrt(0.1)), col = "orange")
+lines(s2_grid,2*dstudent(s2_grid,4,0,sqrt(0.1)), col = "purple")
+lines(s2_grid,2*dstudent(s2_grid,2,0,1.5), col = "blue")
+lines(s2_grid,2*dstudent(s2_grid,4,0,1.5), col =  "darkgreen")
 # draw jarnos student-t
 lines(s2_grid, 2*dstudent(sqrt(s2_grid),4,0,0.1)/(2*sqrt(s2_grid)), col = "green")
-lines(s2_grid, p_jeffreys, col = "blue")
+#lines(s2_grid, p_jeffreys, col = "blue")
 #lines(s2_grid, dinv_gamma(s2_grid,0.5,0.5), col = "orange")
 
 ### probability that s2 is under 10
 pinvgamma(5,2,1) #0.99
-pcauchy(5,0,sqrt(0.01)) - pcauchy(-5,0,sqrt(0.01)) #0.93
+pcauchy(5,0,sqrt(0.001)) - pcauchy(-5,0,sqrt(0.001)) #0.93
+
+
+############ 1/rho
+
+inv_rho_grid <- seq(0.01,2.01,length=500)
+
+
+### student-t(df=4,0,?)
+plot(NULL, xlim = c(0,2), ylim = c(0,2))
+lines(inv_rho_grid,2*dstudent(inv_rho_grid,2,0,0.1), col = "orange")
+lines(inv_rho_grid,2*dstudent(inv_rho_grid,4,0,0.1), col = "purple")
+abline(v=1, col = "red", lty = 2)
+
+# draw jarnos student-t
+lines(s2_grid, 2*dstudent(sqrt(s2_grid),4,0,0.1)/(2*sqrt(s2_grid)), col = "green")
 
 
 #### RHO
 ### half-cauchy(0,sqrt(5)) vs inv_gamma(0.5, 0.5) for rho?
 rho_grid <- seq(0,100,length=500)
-plot(NULL, xlim = c(min(rho_grid),max(rho_grid)), ylim = c(0,0.4))
-lines(rho_grid, 2*dcauchy(rho_grid,0,sqrt(10)),col="red")
+plot(NULL, xlim = c(min(rho_grid),max(rho_grid)), ylim = c(0,0.2))
+lines(rho_grid, 2*dcauchy(rho_grid,0,sqrt(10)), col = "green")
+lines(rho_grid, 2*dcauchy(rho_grid,0,5),col="red")
 lines(rho_grid, 2*dnorm(rho_grid,0,sqrt(10)), col = "blue")
 
 
@@ -91,17 +111,55 @@ pcauchy(100,0,sqrt(10)) - pcauchy(-100,0,sqrt(10)) #0.98
 ### the "realistic" value for l could be e.g. between (0,1000)
 
 ### let's visualize jarnos prior for gulf of finland thing
-l_grid <- seq(0,100,length=500)
-plot(NULL, xlim = c(min(l_grid),max(l_grid)), ylim = c(0,0.1))
+l_grid <- seq(0,400,length=500)
+plot(NULL, xlim = c(min(l_grid),max(l_grid)), ylim = c(0,0.02))
 lines(l_grid, 2*dstudent(1/l_grid,4,0,1)/l_grid^2, col = "blue")
 lines(l_grid,2*dstudent(l_grid,4,10,10), col = "orange")
-lines(l_grid,2*dcauchy(l_grid,0,sqrt(100)), col = "red")
+lines(l_grid,2*dcauchy(l_grid,8,40), col = "red")
+lines(l_grid,2*dstudent(l_grid,4,8,40), col = "red")
+lines(l_grid,2*dcauchy(l_grid,8,sqrt(50)), col = "purple")
 lines(l_grid,dinv_gamma(l_grid,1,1), col = "green")
 
+abline(v = 40)
+
 pinvgamma(1000,1,1) #0.99
-pcauchy(100,0,sqrt(50)) - pcauchy(-100,0,sqrt(50)) #0.95
+pcauchy(100,8,25) - pcauchy(-100,8,25) #0.95
 
 
 integrate(function(x) (x*2*dstudent(x,4,10,10)),0,500)
-integrate(function(x) x*2*dcauchy(x,0,sqrt(100)),0,500)
+integrate(function(x) x*2*dcauchy(x,8,50),0,500)
 
+
+### draw plot of joint prior for l and s2
+
+l_grid <- seq(0,500,length=100)
+s2_grid <- seq(0,5,length=100)
+
+### let's put half-cauchy(0,0.01) and half-cauchy(0,50)
+ls2_grid <- expand.grid(l = l_grid, s2 = s2_grid)
+
+log_lik <- function(l,s2) {
+  return(2*log(2)+dcauchy(l,8,sqrt(100),log=TRUE)+dcauchy(s2,0,sqrt(0.01),log=TRUE))
+}
+
+ll <- mapply(log_lik, ls2_grid$l, ls2_grid$s2)
+
+params_ll <- cbind(ls2_grid,ll)
+
+ggplot(params_ll, aes(x = l, y = s2, fill = ll)) +
+  geom_tile() +  # Alternative: use geom_raster() for larger datasets
+  scale_fill_viridis_c() +  # Better color scale for log-likelihood
+  labs(x = "Parameter 1", y = "Parameter 2", fill = "Log-Likelihood") +
+  theme_minimal()
+
+### normal vs laplace
+
+#install.packages("VGAM")
+library(VGAM)
+
+x_grid <- seq(-5,5,length=200)
+plot(x_grid, dnorm(x_grid,0,sqrt(2)), type = "l", col = "blue", ylim = c(0,0.5))
+lines(x_grid, dlaplace(x_grid,0,1), col = "red")
+
+var(rnorm(1000,0,sqrt(2)))
+var(rlaplace(10000,0,1))
