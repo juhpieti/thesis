@@ -1,3 +1,3 @@
 # Master's thesis
 
-Topic: Spatial zero-inflated modeling of water plant species
+Topic: Bayesian approach for modeling zero-inflated plant percent covers using spatial left-censored beta regression
