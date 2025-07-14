@@ -53,22 +53,20 @@ colnames(pred_grid_1km_2021_july_df)
 
 predictive_grid <- vect("data/estonia_new/predictive_grid_1km_all_variables_2021_july/predictive_grid_1km_all_variables_2021_july.shp")
 
-# loop over the species, save the models
+# loop over the species, save the models (LEFT-CENSORED)
 sp_names <- colnames(train)[20:35]
 n_chains <- 4
-n_iter <- 1000
+n_iter <- 250
 subfolder <- paste0("n_",nrow(X))
 
 model_subfolder <- "" # model where rho is fixed
 model_subfolder <- "scaled_sigmoid/" # model where log(rho) = a + XB w/ second order terms
 
-stan_file_loc <- paste0("stan_files/",model_subfolder,"left_censored_beta_regression.stan")
-
 for (model_subfolder in c("","scaled_sigmoid/")) {
   
   stan_file_loc <- paste0("stan_files/",model_subfolder,"left_censored_beta_regression.stan")
   
-  for (sp_name in sp_names[15]) {
+  for (sp_name in sp_names[4]) {
     y <- train[,sp_name]
     y.01 <- y/100
     
@@ -86,6 +84,36 @@ for (model_subfolder in c("","scaled_sigmoid/")) {
     sp_name_modified <- gsub("/","_",sp_name_modified)
     
     f_name <- paste0("models/",model_subfolder,subfolder,"/M1/",sp_name_modified,".rds")
+    
+    saveRDS(mod.beta, f_name)
+  }
+}
+
+
+### LEFT & RIGHT CENSORED
+for (model_subfolder in c("","scaled_sigmoid/")) {
+  
+  stan_file_loc <- paste0("stan_files/",model_subfolder,"left_right_censored_beta_regression.stan")
+  
+  for (sp_name in sp_names[4]) {
+    y <- train[,sp_name]
+    y.01 <- y/100
+    
+    dat.beta <- list(N = nrow(X.sec_ord),
+                     n_var = ncol(X.sec_ord),
+                     y = y.01,
+                     X = X.sec_ord,
+                     a = 1,
+                     b = 0.5)
+    
+    mod.beta <- stan(stan_file_loc,
+                     data = dat.beta, chains = n_chains, iter = n_iter, seed = 42,
+                     pars = c("mu"), include = FALSE)
+    
+    sp_name_modified <- gsub(" ","_",sp_name)
+    sp_name_modified <- gsub("/","_",sp_name_modified)
+    
+    f_name <- paste0("models/left_right_censored/",model_subfolder,subfolder,"/M1/",sp_name_modified,".rds")
     
     saveRDS(mod.beta, f_name)
   }
