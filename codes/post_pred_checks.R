@@ -1,0 +1,1207 @@
+### plot posterior predictive checks for each model M1-M4 and each species
+
+# load in the training data
+load("data/estonia_new/train/train_2020_2021_n500.Rdata")
+df_sub <- train_n500
+colnames(df_sub)
+colSums(df_sub[,20:38] > 0)
+
+
+###################### DATA PREPARATION ##############################
+
+# remove species that are too rare (under 5 observations)
+train <- df_sub # more comfortable name
+train <- train[,!(colnames(train) %in% c("Furcellaria lumbricalis loose form","Tolypella nidifica","Chara tomentosa"))]
+
+# prepare the covariate matrix
+X <- train[,11:19]
+#X$depth_to_secchi <- X$depth / X$zsd # add secchi/depth for a variable representing seafloor light level
+X$light_bottom <- exp(-1.7*X$depth / X$zsd)
+X <- X[,-which(colnames(X) == "zsd")] #remove secchi depth since it is not interesting for modeling in itself
+
+X.scaled <- scale_covariates(X)
+### add the second order terms
+X.sec_ord <- add_second_order_terms(X.scaled,colnames(X.scaled))
+
+
+library(terra)
+### load in spatial grid
+spatial_grid <- vect("data/estonia_new/spatial_random_effect_grid_20km/spatial_random_effect_grid_20km.shp")
+
+grid_centers <- centroids(spatial_grid)
+grid_centers.df <- as.data.frame(grid_centers, geom = "XY")
+grid_centers.df <- grid_centers.df[,c("x","y")]
+
+dim(grid_centers.df) # there are m = 191 grid cells
+
+### find the observed grid cells
+estonia_sub.vect <- vect(train, geom = c("x","y"), crs = "EPSG:3067")
+
+nearest_grid_center <- nearest(estonia_sub.vect, grid_centers)
+nearest_grid_center.df <- as.data.frame(nearest_grid_center)
+
+# n-length vector indicating the ID of the nearest grid center
+nearest_grid_center.vec <- nearest_grid_center.df$to_id
+
+# take the indexes of grid cells that has observations in them
+observed_grid_cells <- unique(nearest_grid_center.vec)
+observed_grid_cells.df <- grid_centers.df[observed_grid_cells,c("x","y")]
+
+# create the P matrix
+P <- matrix(0,ncol=length(observed_grid_cells),nrow=nrow(train))
+colnames(P) <- rownames(observed_grid_cells.df)
+for (i in 1:nrow(estonia_sub)) {
+  P[i,as.character(nearest_grid_center.vec[i])] <- 1
+}
+
+### put the coordinates in km instead of meters
+observed_grid_cells.df <- observed_grid_cells.df/1000
+
+######################### PP. CHECKS ############################
+
+### MODEL 1 ###
+
+pp_check_beta <- function(mod,y,X,n_rep=50,bin_width = 0.05,test_quantities=FALSE,rho_modeled=FALSE,C=1000,right_censoring=FALSE,a=1,b=0.5,min_rho=0) {
+  # mod: stanfit object
+  # y: observations (N-vector)
+  # X: design matrix to fit the model (Nxp)
+  # n_rep: how many datasets to create
+  
+  
+  # plot the observations first
+  par(mfrow = c(4,4),
+      mar = c(2,4,2,0))
+  
+  breaks <- c(-bin_width, 0, seq(bin_width, 1, by=bin_width)) #manual breaks
+  
+  if (!test_quantities) {
+    hist(y, breaks = breaks, xlim = c(0,1), main = "obs", ylim = c(0,length(y)), freq = TRUE)
+  }
+  
+  alpha.sam <- as.matrix(mod, pars = c("alpha"))
+  beta.sam <- as.matrix(mod, pars = c("beta_1","beta_2"))
+  
+  if (rho_modeled) {
+    alpha_rho_sam <- as.matrix(mod, pars = c("alpha_rho"))
+    beta_rho_sam <- as.matrix(mod, pars = c("beta_rho_1","beta_rho_2"))
+  } else {
+    rho.sam <- as.matrix(mod, pars = c("rho")) 
+  }
+  
+  a <- 1
+  
+  X <- as.matrix(X) # to work with matrix multiplication
+  
+  T_probzero <- c()
+  T_mean <- c()
+  T_mean_positive <- c()
+  T_max <- c()
+  
+  # make n_rep replications of new data, compare to observed coverages
+  rep_idx <- sample(1:nrow(beta.sam),n_rep,replace = FALSE) #randomly take n_rep sets of parameters
+  plot_idx <- sample(rep_idx,15,replace=FALSE) #take 15 to draw the histograms with observed dataset
+  for (i in 1:n_rep) {
+    idx <- rep_idx[i]
+    mu <- inv_logit(alpha.sam[idx,] + X %*% beta.sam[idx,])
+    
+    if (rho_modeled) {
+      rho <- min_rho + (C-min_rho)*inv_logit(alpha_rho_sam[idx,] + X %*% beta_rho_sam[idx,])
+    } else {
+      rho <- rep(rho.sam[idx,],nrow(X)) #common rho
+    }
+    #rho <- rho.sam[idx,]
+    
+    V <- rbeta(nrow(X),mu*rho,(1-mu)*rho)
+    
+    if (!right_censoring) {
+      y_rep <- sapply(V,function(v) (max(0,(a+1)*v - a)))
+    } else {
+      y_rep <- sapply(V,function(v) (max(0,min(1,(a+b+1)*v - a))))
+    }
+    
+    if (!test_quantities) {
+      # plot if was included in the plot sample
+      if (idx %in% plot_idx) {
+        hist(y_rep, breaks = breaks, xlim = c(0,1), main = paste0("rep",i), ylim = c(0,length(y)), freq = TRUE)
+      }
+    }
+
+    # save test statistics
+    T_probzero <- c(T_probzero, mean(y_rep==0))
+    T_mean <- c(T_mean, mean(y_rep))
+    T_mean_positive <- c(T_mean_positive, mean(y_rep[y_rep > 0]))
+    T_max <- c(T_max, max(y_rep))
+  }
+  
+  ### draw histograms of test statistics
+  if (test_quantities) {
+    par(mfrow = c(2,2),
+        mar = c(2,4,2,0))
+    
+    obs_probzero <- mean(y == 0)
+    probzero_pvalue <- mean(obs_probzero <= T_probzero)
+    hist(T_probzero, breaks = 40, main = "proportion of zeros",
+         xlim = c(min(T_probzero,obs_probzero)-0.1*sd(T_probzero),max(T_probzero,obs_probzero)+0.1*sd(T_probzero)),
+         xlab = "T1", probability = TRUE)
+    abline(v = obs_probzero, col = "red", lty = 2, lwd = 2)
+    legend("topright",legend = c("observed"),lty=2,lwd=2,col="red")
+    legend("topleft",legend=paste0("p-value: ", round(probzero_pvalue,2)), bty = "n")
+    
+    obs_max <- max(y)
+    max_pvalue <- mean(obs_max <= T_max)
+    hist(T_max, breaks = 100, main = "max. value",
+         xlim = c(min(T_max,obs_max)-0.1*sd(T_max),max(T_max,obs_max)+0.1*sd(T_max)),
+         xlab = "T2", probability = TRUE)
+    abline(v = obs_max, col = "red", lty = 2, lwd = 2)
+    legend("topleft",legend=paste0("p-value: ", round(max_pvalue,2)), bty = "n")
+    
+    
+    obs_mean <- mean(y)
+    mean_pvalue <- mean(obs_mean <= T_mean)
+    hist(T_mean, breaks = 40, main = "sample mean",
+         xlim = c(min(T_mean,obs_mean)-0.1*sd(T_mean),max(T_mean,obs_mean)+0.1*sd(T_mean)),
+         xlab = "T3", probability = TRUE)
+    abline(v = obs_mean, col = "red", lty = 2, lwd = 2)
+    legend("topleft",legend=paste0("p-value: ", round(mean_pvalue,2)), bty = "n")
+    
+    
+    obs_mean_positive <- mean(y[y>0])
+    mean_positive_pvalue <- mean(obs_mean_positive <= T_mean_positive)
+    hist(T_mean_positive, breaks = 40, main = "sample mean (y>0)",
+         xlim = c(min(T_mean_positive,obs_mean_positive)-0.1*sd(T_mean_positive),max(T_mean_positive,obs_mean_positive)+0.1*sd(T_mean_positive)),
+         xlab = "T4", probability = TRUE)
+    abline(v = obs_mean_positive, col = "red", lty = 2, lwd = 2)
+    legend("topleft",legend=paste0("p-value: ", round(mean_positive_pvalue,2)), bty = "n")
+    
+    
+    
+    return(c(probzero_pval = probzero_pvalue,
+             max_pval = max_pvalue,
+             mean_pval = mean_pvalue,
+             mean_positive_pval = mean_positive_pvalue))
+  }
+}
+
+set.seed(123)
+mod.beta <- readRDS(file = "models/n_500/M1/Cladophora_glomerata.rds")
+mod.beta <- readRDS(file = "models/left_right_censored/n_500/M1/Cladophora_glomerata.rds")
+pp_check_beta(mod.beta, train[,"Cladophora glomerata"]/100,X.sec_ord,200,0.05,test_quantities=TRUE,rho_modeled=FALSE,1000,FALSE,1,0.5)
+
+mod.beta_rho <- readRDS(file = "models/scaled_sigmoid/n_500/M1/Cladophora_glomerata.rds")
+mod.beta_rho <- readRDS(file = "models/left_right_censored/scaled_sigmoid/n_500/M1/Cladophora_glomerata.rds")
+pp_check_beta(mod.beta_rho, train[,"Cladophora glomerata"]/100,X.sec_ord,200,0.05,test_quantities=TRUE,rho_modeled=TRUE,1000,FALSE,1,0.5,min_rho=0)
+
+mod.beta_rho_min2 <- readRDS(file = "models/scaled_sigmoid/rho_min_2/n_500/M1/Cladophora_glomerata.rds")
+pp_check_beta(mod.beta_rho, train[,"Cladophora glomerata"]/100,X.sec_ord,200,0.05,test_quantities=TRUE,rho_modeled=TRUE,1000,FALSE,1,0.5,min_rho=2)
+
+
+#pp_check_beta(mod.beta, train[,"Chara aspera"]/100, X.sec_ord,75,0.05)
+
+pp_check_ZIbeta <- function(mod,y,X,n_rep,bin_width=0.05, test_quantities = FALSE, rho_modeled = FALSE, C = 1000, right_censoring=FALSE, a=1,b=0.5,min_rho=0) {
+  # mod: stanfit object
+  # y: observations (N-vector)
+  # X: design matrix to fit the model (Nxp)
+  # plot the observations first
+  par(mfrow = c(4,4),
+      mar = c(2,4,2,0))
+  
+  breaks <- c(-bin_width, 0, seq(bin_width, 1, by=bin_width)) #manual breaks
+  
+  if (!test_quantities) {
+    hist(y, breaks = breaks, xlim = c(0,1), main = "obs", ylim = c(0,length(y)), freq = TRUE)
+  }
+
+  alpha.sam <- as.matrix(mod, pars = c("alpha"))
+  beta.sam <- as.matrix(mod, pars = c("beta_1","beta_2"))
+  
+  if (rho_modeled) {
+    alpha_rho_sam <- as.matrix(mod, pars = c("alpha_rho"))
+    beta_rho_sam <- as.matrix(mod, pars = c("beta_rho_1","beta_rho_2"))
+  } else {
+    rho.sam <- as.matrix(mod, pars = c("rho")) 
+  }
+  
+  #rho.sam <- as.matrix(mod, pars = c("rho"))
+  alpha_pi.sam <- as.matrix(mod, pars = c("alpha_pi"))
+  beta_pi.sam <- as.matrix(mod, pars = c("beta_pi_1","beta_pi_2"))
+  
+  a <- 1
+  
+  X <- as.matrix(X) # to work with matrix multiplication
+  
+  T_probzero <- c()
+  T_mean <- c()
+  T_mean_positive <- c()
+  T_max <- c()
+  
+  # make n_rep replications of new data, compare to observed coverages
+  rep_idx <- sample(1:nrow(beta.sam),n_rep,replace = FALSE) #randomly take n_rep sets of parameters
+  plot_idx <- sample(rep_idx,15,replace=FALSE) #take 15 to draw the histograms with observed dataset
+  for (i in 1:n_rep) {
+    idx <- rep_idx[i]
+    y_rep <- c()
+    
+    pi <- inv_logit(alpha_pi.sam[idx,] + X %*% beta_pi.sam[idx,])
+    Z <- rbinom(nrow(X),1,pi)
+
+    mu <- inv_logit(alpha.sam[idx,] + X %*% beta.sam[idx,])
+    
+    if (rho_modeled) {
+      rho <- min_rho + (C-min_rho)*inv_logit(alpha_rho_sam[idx,] + X %*% beta_rho_sam[idx,])
+    } else {
+      rho <- rep(rho.sam[idx,],nrow(X)) #common rho
+    }
+    #rho <- rho.sam[idx,]
+    
+    V <- rbeta(nrow(X),mu*rho,(1-mu)*rho)
+    if (!right_censoring) {
+      y_rep <- sapply(V,function(v) (max(0,(a+1)*v - a)))
+    } else {
+      y_rep <- sapply(V,function(v) (max(0,min(1,(a+b+1)*v - a))))
+    }
+
+    y_rep <- Z*y_rep
+    
+    if (!test_quantities) {
+      # plot if was included in the plot sample
+      if (idx %in% plot_idx) {
+        hist(y_rep, breaks = breaks, xlim = c(0,1), main = paste0("rep",i), ylim = c(0,length(y)), freq = TRUE)
+      }
+    }
+    # save test statistics
+    T_probzero <- c(T_probzero, mean(y_rep==0))
+    T_mean <- c(T_mean, mean(y_rep))
+    T_mean_positive <- c(T_mean_positive, mean(y_rep[y_rep > 0]))
+    T_max <- c(T_max, max(y_rep))
+  }
+  
+  ### draw histograms of test statistics
+  if (test_quantities) {
+    par(mfrow = c(2,2))
+    
+    obs_probzero <- mean(y == 0)
+    probzero_pvalue <- mean(obs_probzero <= T_probzero)
+    hist(T_probzero, breaks = 40, main = "proportion of zeros",
+         xlim = c(min(T_probzero,obs_probzero)-0.1*sd(T_probzero),max(T_probzero,obs_probzero)+0.1*sd(T_probzero)),
+         xlab = "T1", probability = TRUE)
+    abline(v = obs_probzero, col = "red", lty = 2, lwd = 2)
+    legend("topright",legend = c("observed"),lty=2,lwd=2,col="red")
+    legend("topleft",legend=paste0("p-value: ", round(probzero_pvalue,2)), bty = "n")
+    
+    obs_max <- max(y)
+    max_pvalue <- mean(obs_max <= T_max)
+    hist(T_max, breaks = 100, main = "max. value",
+         xlim = c(min(T_max,obs_max)-0.1*sd(T_max),max(T_max,obs_max)+0.1*sd(T_max)),
+         xlab = "T2", probability = TRUE)
+    abline(v = obs_max, col = "red", lty = 2, lwd = 2)
+    legend("topleft",legend=paste0("p-value: ", round(max_pvalue,2)), bty = "n")
+    
+    obs_mean <- mean(y)
+    mean_pvalue <- mean(obs_mean <= T_mean)
+    hist(T_mean, breaks = 40, main = "sample mean",
+         xlim = c(min(T_mean,obs_mean)-0.1*sd(T_mean),max(T_mean,obs_mean)+0.1*sd(T_mean)),
+         xlab = "T3", probability = TRUE)
+    abline(v = obs_mean, col = "red", lty = 2, lwd = 2)
+    legend("topleft",legend=paste0("p-value: ", round(mean_pvalue,2)), bty = "n")
+    
+    obs_mean_positive <- mean(y[y>0])
+    mean_positive_pvalue <- mean(obs_mean_positive <= T_mean_positive)
+    hist(T_mean_positive, breaks = 40, main = "sample mean (y>0)",
+         xlim = c(min(T_mean_positive,obs_mean_positive)-0.1*sd(T_mean_positive),max(T_mean_positive,obs_mean_positive)+0.1*sd(T_mean_positive)),
+         xlab = "T4", probability = TRUE)
+    abline(v = obs_mean_positive, col = "red", lty = 2, lwd = 2)
+    legend("topleft",legend=paste0("p-value: ", round(mean_positive_pvalue,2)), bty = "n")
+    
+    
+    return(c(probzero_pval = probzero_pvalue,
+             max_pval = max_pvalue,
+             mean_pval = mean_pvalue,
+             mean_positive_pval = mean_positive_pvalue))
+  }
+}
+
+set.seed(123)
+mod.ZIbeta <- readRDS(file = "models/n_500/M2/Cladophora_glomerata.rds")
+mod.ZIbeta <- readRDS(file = "models/left_right_censored/n_500/M2/Cladophora_glomerata.rds")
+pp_check_ZIbeta(mod.ZIbeta, train[,"Cladophora glomerata"]/100, X.sec_ord,100,0.05,test_quantities=TRUE,rho_modeled=FALSE,1000,TRUE,1,0.5)
+
+mod.ZIbeta_rho <- readRDS(file="models/scaled_sigmoid/n_500/M2/Cladophora_glomerata.rds")
+mod.ZIbeta_rho <- readRDS(file="models/left_right_censored/scaled_sigmoid/n_500/M2/Cladophora_glomerata.rds")
+pp_check_ZIbeta(mod.ZIbeta_rho, train[,"Cladophora glomerata"]/100, X.sec_ord,100,0.05,test_quantities=TRUE,rho_modeled=TRUE,1000,TRUE,1,0.5)
+
+pp_check_beta_spat <- function(mod,y,X,P,n_rep,bin_width=0.05, test_quantities = FALSE, rho_modeled = FALSE, C=1000) {
+  # mod: stanfit object
+  # y: observations (N-vector)
+  # X: design matrix to fit the model (Nxp)
+  # P: matrix that tells in which grid cell each belongs to
+  # plot the observations first
+  par(mfrow = c(4,4),
+      mar = c(2,4,2,0))
+  
+  breaks <- c(-bin_width, 0, seq(bin_width, 1, by=bin_width)) #manual breaks
+  
+  if(!test_quantities) {
+    hist(y, breaks = breaks, xlim = c(0,1), main = "obs", ylim = c(0,length(y)), freq = TRUE)
+  }
+  
+  alpha.sam <- as.matrix(mod, pars = c("alpha"))
+  beta.sam <- as.matrix(mod, pars = c("beta_1","beta_2"))
+  
+  if (rho_modeled) {
+    alpha_rho_sam <- as.matrix(mod, pars = c("alpha_rho"))
+    beta_rho_sam <- as.matrix(mod, pars = c("beta_rho_1","beta_rho_2"))
+  } else {
+    rho.sam <- as.matrix(mod, pars = c("rho")) 
+  }
+  
+  #rho.sam <- as.matrix(mod, pars = c("rho"))
+  phi.sam <- as.matrix(mod, pars = c("phi"))
+  
+  a <- 1
+  
+  X <- as.matrix(X) # to work with matrix multiplication
+  
+  T_probzero <- c()
+  T_mean <- c()
+  T_mean_positive <- c()
+  T_max <- c()
+  
+  # make n_rep replications of new data, compare to observed coverages
+  rep_idx <- sample(1:nrow(beta.sam),n_rep,replace = FALSE) #randomly take n_rep sets of parameters
+  plot_idx <- sample(rep_idx,15,replace=FALSE) #take 15 to draw the histograms with observed dataset
+  for (i in 1:n_rep) {
+    idx <- rep_idx[i]
+    mu <- inv_logit(alpha.sam[idx,] + X %*% beta.sam[idx,] + P %*% phi.sam[idx,])
+    
+    if (rho_modeled) {
+      rho <- C*inv_logit(alpha_rho_sam[idx,] + X %*% beta_rho_sam[idx,])
+    } else {
+      rho <- rep(rho.sam[idx,],nrow(X)) #common rho
+    }
+    #rho <- rho.sam[idx,]
+    
+    V <- rbeta(nrow(X),mu*rho,(1-mu)*rho)
+    y_rep <- sapply(V,function(v) (max(0,(a+1)*v - a)))
+    
+    if(!test_quantities) {
+      # plot if was included in the plot sample
+      if (idx %in% plot_idx) {
+        hist(y_rep, breaks = breaks, xlim = c(0,1), main = paste0("rep",i), ylim = c(0,length(y)), freq = TRUE)
+      }
+    }
+    
+    # save test statistics
+    T_probzero <- c(T_probzero, mean(y_rep==0))
+    T_mean <- c(T_mean, mean(y_rep))
+    T_mean_positive <- c(T_mean_positive, mean(y_rep[y_rep > 0]))
+    T_max <- c(T_max, max(y_rep))
+  }
+  
+  if(test_quantities) {
+    ### draw histograms of test statistics
+    par(mfrow = c(2,2))
+    
+    obs_probzero <- mean(y == 0)
+    probzero_pvalue <- mean(obs_probzero <= T_probzero)
+    hist(T_probzero, breaks = 40, main = "proportion of zeros",
+         xlim = c(min(T_probzero,obs_probzero)-0.1*sd(T_probzero),max(T_probzero,obs_probzero)+0.1*sd(T_probzero)),
+         xlab = "T1", probability = TRUE)
+    abline(v = obs_probzero, col = "red", lty = 2, lwd = 2)
+    legend("topright",legend = c("observed"),lty=2,lwd=2,col="red")
+    legend("topleft",legend=paste0("p-value: ", round(probzero_pvalue,2)), bty = "n")
+    
+    
+    obs_max <- max(y)
+    max_pvalue <- mean(obs_max <= T_max)
+    hist(T_max, breaks = 100, main = "max. value",
+         xlim = c(min(T_max,obs_max)-0.1*sd(T_max),max(T_max,obs_max)+0.1*sd(T_max)),
+         xlab = "T2", probability = TRUE)
+    abline(v = obs_max, col = "red", lty = 2, lwd = 2)
+    legend("topleft",legend=paste0("p-value: ", round(max_pvalue,2)), bty = "n")
+    
+    obs_mean <- mean(y)
+    mean_pvalue <- mean(obs_mean <= T_mean)
+    hist(T_mean, breaks = 40, main = "sample mean",
+         xlim = c(min(T_mean,obs_mean)-0.1*sd(T_mean),max(T_mean,obs_mean)+0.1*sd(T_mean)),
+         xlab = "T3", probability = TRUE)
+    abline(v = obs_mean, col = "red", lty = 2, lwd = 2)
+    legend("topleft",legend=paste0("p-value: ", round(mean_pvalue,2)), bty = "n")
+    
+    
+    obs_mean_positive <- mean(y[y>0])
+    mean_positive_pvalue <- mean(obs_mean_positive <= T_mean_positive)
+    hist(T_mean_positive, breaks = 40, main = "sample mean (y>0)",
+         xlim = c(min(T_mean_positive,obs_mean_positive)-0.1*sd(T_mean_positive),max(T_mean_positive,obs_mean_positive)+0.1*sd(T_mean_positive)),
+         xlab = "T4", probability = TRUE)
+    abline(v = obs_mean_positive, col = "red", lty = 2, lwd = 2)
+    legend("topleft",legend=paste0("p-value: ", round(mean_positive_pvalue,2)), bty = "n")
+    
+    
+    
+    return(c(probzero_pval = probzero_pvalue,
+             max_pval = max_pvalue,
+             mean_pval = mean_pvalue,
+             mean_positive_pval = mean_positive_pvalue))
+  }
+}
+
+set.seed(123)
+mod.beta_spat <- readRDS(file = "models/n_2000/M3/Cladophora_glomerata.rds")
+pp_check_beta_spat(mod.beta_spat, train[,"Cladophora glomerata"]/100, X.sec_ord,P,100,0.05,test_quantities=TRUE,rho_modeled=FALSE,1000)
+
+mod.beta_spat_rho <- readRDS(file = "models/scaled_sigmoid/n_2000/M3/Cladophora_glomerata.rds")
+pp_check_beta_spat(mod.beta_spat_rho, train[,"Cladophora glomerata"]/100, X.sec_ord,P,100,0.05,test_quantities=TRUE,rho_modeled=TRUE,1000)
+
+
+pp_check_ZIbeta_spat <- function(mod,y,X,P,n_rep,bin_width,test_quantities = FALSE, rho_modeled = FALSE, C = 1000) {
+  # mod: stanfit object
+  # y: observations (N-vector)
+  # X: design matrix to fit the model (Nxp)
+  
+  par(mfrow = c(4,4),
+      mar = c(2,4,2,0))
+  
+  breaks <- c(-bin_width, 0, seq(bin_width, 1, by=bin_width)) #manual breaks
+  
+  if(!test_quantities) {
+    hist(y, breaks = breaks, xlim = c(0,1), main = "obs", ylim = c(0,length(y)), freq = TRUE)
+  }
+
+  alpha.sam <- as.matrix(mod, pars = c("alpha"))
+  beta.sam <- as.matrix(mod, pars = c("beta_1","beta_2"))
+  
+  if (rho_modeled) {
+    alpha_rho_sam <- as.matrix(mod, pars = c("alpha_rho"))
+    beta_rho_sam <- as.matrix(mod, pars = c("beta_rho_1","beta_rho_2"))
+  } else {
+    rho.sam <- as.matrix(mod, pars = c("rho")) 
+  }
+  
+  alpha_pi.sam <- as.matrix(mod, pars = c("alpha_pi"))
+  beta_pi.sam <- as.matrix(mod, pars = c("beta_pi_1","beta_pi_2"))
+  
+  phi_mu.sam <- as.matrix(mod, pars = c("phi_mu"))
+  phi_pi.sam <- as.matrix(mod, pars = c("phi_pi"))
+  
+  a <- 1
+  
+  X <- as.matrix(X) # to work with matrix multiplication
+  
+  T_probzero <- c()
+  T_mean <- c()
+  T_mean_positive <- c()
+  T_max <- c()
+  
+  # make n_rep replications of new data, compare to observed coverages
+  rep_idx <- sample(1:nrow(beta.sam),n_rep,replace = FALSE) #randomly take n_rep sets of parameters
+  plot_idx <- sample(rep_idx,15,replace=FALSE) #take 15 to draw the histograms with observed dataset
+  for (i in 1:n_rep) {
+    idx <- rep_idx[i]
+    y_rep <- c()
+    
+    pi <- inv_logit(alpha_pi.sam[idx,] + X %*% beta_pi.sam[idx,] + P %*% phi_pi.sam[idx,])
+    Z <- rbinom(nrow(X),1,pi)
+    
+    mu <- inv_logit(alpha.sam[idx,] + X %*% beta.sam[idx,] + P %*% phi_mu.sam[idx,])
+    
+    if (rho_modeled) {
+      rho <- C*inv_logit(alpha_rho_sam[idx,] + X %*% beta_rho_sam[idx,])
+    } else {
+      rho <- rep(rho.sam[idx,],nrow(X)) #common rho
+    }
+    #rho <- rho.sam[idx,]
+    
+    V <- rbeta(nrow(X),mu*rho,(1-mu)*rho)
+    y_rep <- sapply(V,function(v) (max(0,(a+1)*v - a)))
+    
+    y_rep <- Z*y_rep
+    
+    if (!test_quantities) {
+      # plot if was included in the plot sample
+      if (idx %in% plot_idx) {
+        hist(y_rep, breaks = breaks, xlim = c(0,1), main = paste0("rep",i), ylim = c(0,length(y)), freq = TRUE)
+      }
+    }
+
+    # save test statistics
+    T_probzero <- c(T_probzero, mean(y_rep==0))
+    T_mean <- c(T_mean, mean(y_rep))
+    T_mean_positive <- c(T_mean_positive, mean(y_rep[y_rep > 0]))
+    T_max <- c(T_max, max(y_rep))
+  }
+  
+  ### draw histograms of test statistics
+  if (test_quantities) {
+    par(mfrow = c(2,2))
+    
+    obs_probzero <- mean(y == 0)
+    probzero_pvalue <- mean(obs_probzero <= T_probzero)
+    hist(T_probzero, breaks = 40, main = "proportion of zeros",
+         xlim = c(min(T_probzero,obs_probzero)-0.1*sd(T_probzero),max(T_probzero,obs_probzero)+0.1*sd(T_probzero)),
+         xlab = "T1", probability = TRUE)
+    abline(v = obs_probzero, col = "red", lty = 2, lwd = 2)
+    legend("topright",legend = c("observed"),lty=2,lwd=2,col="red")
+    legend("topleft",legend=paste0("p-value: ", round(probzero_pvalue,2)), bty = "n")
+    
+    
+    obs_max <- max(y)
+    max_pvalue <- mean(obs_max <= T_max)
+    hist(T_max, breaks = 100, main = "max. value",
+         xlim = c(min(T_max,obs_max)-0.1*sd(T_max),max(T_max,obs_max)+0.1*sd(T_max)),
+         xlab = "T2", probability = TRUE)
+    abline(v = obs_max, col = "red", lty = 2, lwd = 2)
+    legend("topleft",legend=paste0("p-value: ", round(max_pvalue,2)), bty = "n")
+    
+    obs_mean <- mean(y)
+    mean_pvalue <- mean(obs_mean <= T_mean)
+    hist(T_mean, breaks = 40, main = "sample mean",
+         xlim = c(min(T_mean,obs_mean)-0.1*sd(T_mean),max(T_mean,obs_mean)+0.1*sd(T_mean)),
+         xlab = "T3", probability = TRUE)
+    abline(v = obs_mean, col = "red", lty = 2, lwd = 2)
+    legend("topleft",legend=paste0("p-value: ", round(mean_pvalue,2)), bty = "n")
+    
+    obs_mean_positive <- mean(y[y>0])
+    mean_positive_pvalue <- mean(obs_mean_positive <= T_mean_positive)
+    hist(T_mean_positive, breaks = 40, main = "sample mean (y>0)",
+         xlim = c(min(T_mean_positive,obs_mean_positive)-0.1*sd(T_mean_positive),max(T_mean_positive,obs_mean_positive)+0.1*sd(T_mean_positive)),
+         xlab = "T4", probability = TRUE)
+    abline(v = obs_mean_positive, col = "red", lty = 2, lwd = 2)
+    legend("topleft",legend=paste0("p-value: ", round(mean_positive_pvalue,2)), bty = "n")
+    
+    
+    return(c(probzero_pval = probzero_pvalue,
+             max_pval = max_pvalue,
+             mean_pval = mean_pvalue,
+             mean_positive_pval = mean_positive_pvalue))
+  }
+}
+
+set.seed(123)
+mod.ZIBeta_spat <- readRDS(file = "models/n_2000/M4/Cladophora_glomerata.rds")
+pp_check_ZIbeta_spat(mod.ZIBeta_spat, train[,"Cladophora glomerata"]/100, X.sec_ord,P,100,0.05,test_quantities=TRUE,rho_modeled=FALSE,1000)
+
+mod.ZIBeta_spat_rho <- readRDS(file = "models/scaled_sigmoid/n_2000/M4/Cladophora_glomerata.rds")
+pp_check_ZIbeta_spat(mod.ZIBeta_spat_rho, train[,"Cladophora glomerata"]/100, X.sec_ord,P,100,0.05,test_quantities=TRUE,rho_modeled=TRUE,1000)
+
+
+########### GO THROUGH ALL SPECIES ###############
+
+
+sp_names <- colnames(train)[20:35]
+
+bin_width <- 0.05
+n_rep <- 200
+
+im_width <- 800
+im_height <- 600
+
+subfolder <- paste0("n_",nrow(X))
+
+set.seed(123)
+
+pval_probzero <- c()
+pval_max <- c()
+pval_mean <- c()
+pval_mean_pos <- c()
+
+for(sp_name in sp_names[4]) {
+  sp_name_modified <- gsub(" ","_",sp_name)
+  sp_name_modified <- gsub("/","_",sp_name_modified)
+  
+  ### load in models
+  mod.beta <- readRDS(paste0("models/",subfolder,"/M1/",sp_name_modified,".rds"))
+  mod.ZIbeta <- readRDS(paste0("models/",subfolder,"/M2/",sp_name_modified,".rds"))
+  mod.beta_spat <- readRDS(paste0("models/",subfolder,"/M3/",sp_name_modified,".rds"))
+  mod.ZIBeta_spat <- readRDS(paste0("models/",subfolder,"/M4/",sp_name_modified,".rds"))
+  
+  ### load in rho models
+  mod.beta_rho <- readRDS(paste0("models/scaled_sigmoid/",subfolder,"/M1/",sp_name_modified,".rds"))
+  mod.ZIbeta_rho <- readRDS(paste0("models/scaled_sigmoid/",subfolder,"/M2/",sp_name_modified,".rds"))
+  mod.beta_spat_rho <- readRDS(paste0("models/scaled_sigmoid/",subfolder,"/M3/",sp_name_modified,".rds"))
+  mod.ZIBeta_spat_rho <- readRDS(paste0("models/scaled_sigmoid/",subfolder,"/M4/",sp_name_modified,".rds"))
+  
+  # plot and save posterior predictive checks
+  ### base model
+  png(paste0("plots/final_results/",subfolder,"/M1/pp_checks/histograms/",sp_name_modified,".png"), width = im_width, height = im_height)
+  pp_check_beta(mod.beta, train[,sp_name]/100, X.sec_ord,n_rep,bin_width,test_quantities = FALSE,rho_modeled=FALSE,C=1000)
+  dev.off()
+  
+  png(paste0("plots/final_results/scaled_sigmoid/",subfolder,"/M1/pp_checks/histograms/",sp_name_modified,".png"), width = im_width, height = im_height)
+  pp_check_beta(mod.beta_rho, train[,sp_name]/100, X.sec_ord,n_rep,bin_width,test_quantities = FALSE,rho_modeled=TRUE,C=1000)
+  dev.off()
+
+  png(paste0("plots/final_results/",subfolder,"/M1/pp_checks/test_quantities/",sp_name_modified,".png"), width = im_width, height = im_height)
+  pvals.beta <- pp_check_beta(mod.beta, train[,sp_name]/100, X.sec_ord,n_rep,bin_width,test_quantities = TRUE,rho_modeled=FALSE,C=1000)
+  dev.off()
+  
+  png(paste0("plots/final_results/scaled_sigmoid/",subfolder,"/M1/pp_checks/test_quantities/",sp_name_modified,".png"), width = im_width, height = im_height)
+  pvals.beta <- pp_check_beta(mod.beta_rho, train[,sp_name]/100, X.sec_ord,n_rep,bin_width,test_quantities = TRUE,rho_modeled=TRUE,C=1000)
+  dev.off()
+  
+  ### ZI model
+  png(paste0("plots/final_results/",subfolder,"/M2/pp_checks/histograms/",sp_name_modified,".png"), width = im_width, height = im_height)
+  pp_check_ZIbeta(mod.ZIbeta, train[,sp_name]/100, X.sec_ord,n_rep,bin_width,test_quantities = FALSE,rho_modeled=FALSE,C=1000)
+  dev.off()
+  
+  png(paste0("plots/final_results/scaled_sigmoid/",subfolder,"/M2/pp_checks/histograms/",sp_name_modified,".png"), width = im_width, height = im_height)
+  pp_check_ZIbeta(mod.ZIbeta_rho, train[,sp_name]/100, X.sec_ord,n_rep,bin_width,test_quantities = FALSE,rho_modeled=TRUE,C=1000)
+  dev.off()
+
+  png(paste0("plots/final_results/",subfolder,"/M2/pp_checks/test_quantities/",sp_name_modified,".png"), width = im_width, height = im_height)
+  pvals.ZIbeta <- pp_check_ZIbeta(mod.ZIbeta, train[,sp_name]/100, X.sec_ord,n_rep,bin_width,test_quantities = TRUE,rho_modeled=FALSE,C=1000)
+  dev.off()
+  
+  png(paste0("plots/final_results/scaled_sigmoid/",subfolder,"/M2/pp_checks/test_quantities/",sp_name_modified,".png"), width = im_width, height = im_height)
+  pvals.ZIbeta <- pp_check_ZIbeta(mod.ZIbeta_rho, train[,sp_name]/100, X.sec_ord,n_rep,bin_width,test_quantities = TRUE,rho_modeled=TRUE,C=1000)
+  dev.off()
+  
+  ### spat model
+  png(paste0("plots/final_results/",subfolder,"/M3/pp_checks/histograms/",sp_name_modified,".png"), width = im_width, height = im_height)
+  pp_check_beta_spat(mod.beta_spat, train[,sp_name]/100, X.sec_ord,P,n_rep,bin_width,test_quantities = FALSE,rho_modeled=FALSE,C=1000)
+  dev.off()
+  
+  png(paste0("plots/final_results/scaled_sigmoid/",subfolder,"/M3/pp_checks/histograms/",sp_name_modified,".png"), width = im_width, height = im_height)
+  pp_check_beta_spat(mod.beta_spat_rho, train[,sp_name]/100, X.sec_ord,P,n_rep,bin_width,test_quantities = FALSE,rho_modeled=TRUE,C=1000)
+  dev.off()
+
+  png(paste0("plots/final_results/",subfolder,"/M3/pp_checks/test_quantities/",sp_name_modified,".png"), width = im_width, height = im_height)
+  pvals.beta_spat <- pp_check_beta_spat(mod.beta_spat, train[,sp_name]/100, X.sec_ord,P,n_rep,bin_width,test_quantities = TRUE,rho_modeled=FALSE,C=1000)
+  dev.off()
+  
+  png(paste0("plots/final_results/scaled_sigmoid/",subfolder,"/M3/pp_checks/test_quantities/",sp_name_modified,".png"), width = im_width, height = im_height)
+  pvals.beta_spat <- pp_check_beta_spat(mod.beta_spat_rho, train[,sp_name]/100, X.sec_ord,P,n_rep,bin_width,test_quantities = TRUE,rho_modeled=TRUE,C=1000)
+  dev.off()
+  
+  ### spat ZI model
+  png(paste0("plots/final_results/",subfolder,"/M4/pp_checks/histograms/",sp_name_modified,".png"), width = im_width, height = im_height)
+  pp_check_ZIbeta_spat(mod.ZIBeta_spat, train[,sp_name]/100, X.sec_ord,P,n_rep,bin_width,test_quantities=FALSE,rho_modeled=FALSE,C=1000)
+  dev.off()
+  
+  png(paste0("plots/final_results/scaled_sigmoid/",subfolder,"/M4/pp_checks/histograms/",sp_name_modified,".png"), width = im_width, height = im_height)
+  pp_check_ZIbeta_spat(mod.ZIBeta_spat_rho, train[,sp_name]/100, X.sec_ord,P,n_rep,bin_width,test_quantities=FALSE,rho_modeled=TRUE,C=1000)
+  dev.off()
+
+  png(paste0("plots/final_results/",subfolder,"/M4/pp_checks/test_quantities/",sp_name_modified,".png"), width = im_width, height = im_height)
+  pvals.ZIBeta_spat <- pp_check_ZIbeta_spat(mod.ZIBeta_spat, train[,sp_name]/100, X.sec_ord,P,n_rep,bin_width,test_quantities=TRUE,rho_modeled=FALSE,C=1000)
+  dev.off()
+  
+  png(paste0("plots/final_results/scaled_sigmoid/",subfolder,"/M4/pp_checks/test_quantities/",sp_name_modified,".png"), width = im_width, height = im_height)
+  pvals.ZIBeta_spat <- pp_check_ZIbeta_spat(mod.ZIBeta_spat_rho, train[,sp_name]/100, X.sec_ord,P,n_rep,bin_width,test_quantities=TRUE,rho_modeled=TRUE,C=1000)
+  dev.off()
+  
+  pval_probzero <- rbind(pval_probzero,
+                         c(pvals.beta[1],pvals.ZIbeta[1],pvals.beta_spat[1],pvals.ZIBeta_spat[1]))
+  
+  pval_max <- rbind(pval_max,
+                    c(pvals.beta[2],pvals.ZIbeta[2],pvals.beta_spat[2],pvals.ZIBeta_spat[2]))
+  
+  pval_mean <- rbind(pval_mean,
+                         c(pvals.beta[3],pvals.ZIbeta[3],pvals.beta_spat[3],pvals.ZIBeta_spat[3]))
+  
+  pval_mean_pos <- rbind(pval_mean_pos,
+                         c(pvals.beta[4],pvals.ZIbeta[4],pvals.beta_spat[4],pvals.ZIBeta_spat[4]))
+}
+
+
+###### PLAYGROUND ######
+### Examine the distribution for single observation with some species that seems difficult to model
+
+pp_check_ZIbeta_scaled_v2 <- function(mod,y,X,n_rep,bin_width=0.05, test_quantities = FALSE, C = 1000, sigmoid = FALSE) {
+  # mod: stanfit object
+  # y: observations (N-vector)
+  # X: design matrix to fit the model (Nxp)
+  # plot the observations first
+  par(mfrow = c(4,4),
+      mar = c(2,4,2,0))
+  
+  breaks <- c(-bin_width, 0, seq(bin_width, 1, by=bin_width)) #manual breaks
+  
+  if (!test_quantities) {
+    hist(y, breaks = breaks, xlim = c(0,1), main = "obs", ylim = c(0,length(y)), freq = TRUE)
+  }
+  
+  alpha.sam <- as.matrix(mod, pars = c("alpha"))
+  beta.sam <- as.matrix(mod, pars = c("beta_1","beta_2"))
+  #rho.sam <- as.matrix(mod, pars = c("rho"))
+  alpha_pi.sam <- as.matrix(mod, pars = c("alpha_pi"))
+  beta_pi.sam <- as.matrix(mod, pars = c("beta_pi_1","beta_pi_2"))
+  alpha_rho.sam <- as.matrix(mod, pars = c("alpha_rho"))
+  beta_rho.sam <- as.matrix(mod, pars = c("beta_rho_1","beta_rho_2"))
+  
+  a <- 1
+  
+  X <- as.matrix(X) # to work with matrix multiplication
+  
+  T_probzero <- c()
+  T_mean <- c()
+  
+  # make n_rep replications of new data, compare to observed coverages
+  rep_idx <- sample(1:nrow(beta.sam),n_rep,replace = FALSE) #randomly take n_rep sets of parameters
+  plot_idx <- sample(rep_idx,15,replace=FALSE) #take 15 to draw the histograms with observed dataset
+  for (i in 1:n_rep) {
+    idx <- rep_idx[i]
+    y_rep <- c()
+    
+    pi <- inv_logit(alpha_pi.sam[idx,] + X %*% beta_pi.sam[idx,])
+    Z <- rbinom(nrow(X),1,pi)
+    
+    mu <- inv_logit(alpha.sam[idx,] + X %*% beta.sam[idx,])
+    #rho <- rho.sam[idx,]
+    if (sigmoid) {
+      rho <- C*inv_logit(alpha_rho.sam[idx, ] + X %*% beta_rho.sam[idx,])
+    } else {
+      rho <- exp(alpha_rho.sam[idx, ] + X %*% beta_rho.sam[idx,])
+    }
+    
+    V <- rbeta(nrow(X),mu*rho,(1-mu)*rho)
+    y_rep <- sapply(V,function(v) (max(0,(a+1)*v - a)))
+    
+    y_rep <- Z*y_rep
+    
+    if (!test_quantities) {
+      # plot if was included in the plot sample
+      if (idx %in% plot_idx) {
+        hist(y_rep, breaks = breaks, xlim = c(0,1), main = paste0("rep",i), ylim = c(0,length(y)), freq = TRUE)
+      }
+    }
+    # save test statistics
+    T_probzero <- c(T_probzero, mean(y_rep==0))
+    T_mean <- c(T_mean, mean(y_rep))
+  }
+  
+  ### draw histograms of test statistics
+  if (test_quantities) {
+    par(mfrow = c(1,2))
+    
+    obs_probzero <- mean(y==0)
+    probzero_pvalue <- mean(obs_probzero >= T_probzero)
+    hist(T_probzero, breaks = 20, main = "proportion of zeros",
+         xlim = c(min(T_probzero,obs_probzero)-0.1*sd(T_probzero),max(T_probzero,obs_probzero)+0.1*sd(T_probzero)),
+         xlab = "T1", probability = TRUE)
+    abline(v = obs_probzero, col = "red", lty = 2, lwd = 2)
+    
+    obs_mean <- mean(y)
+    mean_pvalue <- mean(obs_mean >= T_mean)
+    hist(T_mean, breaks = 20, main = "sample mean",
+         xlim = c(min(T_mean,obs_mean)-0.1*sd(T_mean),max(T_mean,obs_mean)+0.1*sd(T_mean)),
+         xlab = "T2", probability = TRUE)
+    abline(v = obs_mean, col = "red", lty = 2, lwd = 2)
+    
+    return(c(probzero_pval = probzero_pvalue, mean_pval = mean_pvalue))
+  }
+}
+
+
+sp_test <- sp_names[4]
+y_test <- train[,sp_test]
+
+#sp_test <- "Amphibalanus improvisus"
+sp_test <- "Cladophora glomerata"
+#sp_test <- "Chara aspera"
+#sp_test <- "Myriophyllum spicatum"
+#sp_test <- "Mytilus trossulus"
+
+sp_test_modified <- gsub(" ","_",sp_test)
+sp_test_modified <- gsub("/","_",sp_test_modified)
+
+
+### first examine differences in posterior predictive checks
+mod_base <- readRDS(paste0("models/n_500/M2/",sp_test_modified,".rds"))
+#mod_base <- readRDS(paste0("models/left_right_censored/n_500/M2/",sp_test_modified,".rds"))
+#mod_logrho <- readRDS(paste0("models/rho_with_covariates/n_500/M2/",sp_test_modified,".rds"))
+#mod_inv_rho <- readRDS(paste0("models/inv_rho_prior/n_500/M2/",sp_test_modified,".rds"))
+mod_scaled_sigmoid <- readRDS(paste0("models/scaled_sigmoid/n_500/M2/",sp_test_modified,".rds"))
+#mod_scaled_sigmoid <- readRDS(paste0("models/left_right_censored/scaled_sigmoid/n_500/M2/",sp_test_modified,".rds"))
+mod_scaled_sigmoid_min_2 <- readRDS(paste0("models/scaled_sigmoid/rho_min_2/n_500/M2/",sp_test_modified,".rds"))
+
+set.seed(123)
+pp_check_ZIbeta(mod_base,train[,sp_test]/100,X.sec_ord,100,0.05,TRUE,FALSE,1000,FALSE,1,0.5,min_rho=0)
+#pp_check_ZIbeta(mod_inv_rho,train[,sp_test]/100,X.sec_ord,100,0.05,TRUE)
+set.seed(123)
+pp_check_ZIbeta(mod_scaled_sigmoid,train[,sp_test]/100,X.sec_ord,200,0.05,TRUE,TRUE,1000,FALSE,1,0.5,min_rho=0)
+set.seed(123)
+pp_check_ZIbeta(mod_scaled_sigmoid_min_2,train[,sp_test]/100,X.sec_ord,200,0.05,TRUE,TRUE,1000,FALSE,1,0.5,min_rho=2)
+
+#pp_check_ZIbeta_scaled_v2(mod_scaled_sigmoid,train[,sp_test]/100,X.sec_ord,100,0.05,FALSE,1000,sigmoid=TRUE)
+#pp_check_ZIbeta_scaled_v2(mod_logrho,train[,sp_test]/100,X.sec_ord,100,0.05,TRUE,1000,sigmoid=FALSE)
+#pp_check_ZIbeta_v2(mod_logrho,train[,sp_test]/100,X.sec_ord,100,0.05,FALSE)
+
+obs_cover <- 95
+y_test <- train[,sp_test]
+idx <- which(y_test == obs_cover)[1]
+
+mod_test <- mod_base
+#mod_test <- mod_inv_rho
+
+alpha.sam <- as.matrix(mod_test, pars = c("alpha"))
+beta.sam <- as.matrix(mod_test, pars = c("beta_1","beta_2"))
+rho.sam <- as.matrix(mod_test, pars = c("rho"))
+
+alpha_pi.sam <- as.matrix(mod_test, pars = c("alpha_pi"))
+beta_pi.sam <- as.matrix(mod_test, pars = c("beta_pi_1","beta_pi_2"))
+
+alpha_pi.mean <- colMeans(alpha_pi.sam)
+beta_pi.mean <- colMeans(beta_pi.sam)
+
+alpha.mean <- colMeans(alpha.sam)
+beta.mean <- colMeans(beta.sam)
+rho.mean <- colMeans(rho.sam)
+
+# phi_mu.sam <- as.matrix(mod_test, pars = c("phi_mu"))
+# phi_pi.sam <- as.matrix(mod_test, pars = c("phi_pi"))
+# phi_mu.mean <- colMeans(phi_mu.sam)
+# phi_pi.mean <- colMeans(phi_pi.sam)
+
+mu <- inv_logit(alpha.mean  + as.matrix(X.sec_ord)[idx, ] %*% beta.mean)
+prob_suit <- inv_logit(alpha_pi.mean + as.matrix(X.sec_ord)[idx, ] %*% beta_pi.mean)
+
+### spat_version
+# mu <- inv_logit(alpha.mean  + as.matrix(X.sec_ord)[idx, ] %*% beta.mean + P[idx,] %*% phi_mu.mean)
+# prob_suit <- inv_logit(alpha_pi.mean + as.matrix(X.sec_ord)[idx, ] %*% beta_pi.mean + P[idx,] %*% phi_pi.mean)
+
+rho <- rho.mean
+
+par(mfrow = c(1,1))
+
+a <- 1
+b <- 0.5
+
+x_grid <- seq(-a,1,length=200)
+plot(x_grid, dbeta((x_grid + a) /(a+1),mu*rho,(1-mu)*rho)/(a+1), type = "l", ylim = 0:1, main = sp_test)
+abline(v=0,col="red")
+points(obs_cover/100, 0.01, pch = 19, col = "blue", cex = 2)
+legend("topleft", legend = paste0("Pr(suitability) = ", round(100*prob_suit,2), "%"), bty = "n")
+
+### sample random points  
+n <- 1000
+V_sample <- rbeta(100,mu*rho,(1-mu)*rho)
+W_sample <- (a+1)*V_sample - a
+points(W_sample, 0.01 + rnorm(length(W_sample),0.02,0.002), col = "red", pch = 19, cex = 0.5)
+y_rep <- sapply(W_sample, function(x) (max(0,x)))
+mean(y_rep)
+mean(y_rep[y_rep > 0])
+
+### plot separate response curves?
+#plot_responses(mod_base,X,100,2)
+plot_responses(mod_inv_rho,X,100,2,FALSE,1000,10)
+plot_responses(mod_logrho,X,100,2,TRUE,1000,10)
+
+
+### draw multiple images
+
+par(mfrow = c(4,4),
+    mar = c(2,3,2,1))
+
+set.seed(13)
+counter <- 1
+for (idx in sample(which(y_test > 0),16)) {
+    obs_cover <- y_test[idx]
+    alpha.mean <- alpha.sam[idx, ]
+    beta.mean <- beta.sam[idx, ]
+    alpha_pi.mean <- alpha_pi.sam[idx, ]
+    beta_pi.mean <- beta_pi.sam[idx, ]
+    rho.mean <- rho.sam[idx, ]
+    
+    mu <- inv_logit(alpha.mean  + as.matrix(X.sec_ord)[idx, ] %*% beta.mean)
+    prob_suit <- inv_logit(alpha_pi.mean + as.matrix(X.sec_ord)[idx, ] %*% beta_pi.mean)
+    rho <- rho.mean
+    
+    #x_grid <- seq(-a,1,length=200)
+    x_grid <- seq(-a,1+b,length=200)
+    #plot(x_grid, dbeta((x_grid + a) /(a+1),mu*rho,(1-mu)*rho)/(a+1), type = "l", ylim = c(0,1.5), main = paste0("obs. ",idx), xlab = "w", ylab = "f(w)")
+    plot(x_grid, dbeta((x_grid+a)/(a+b+1),mu*rho,(1-mu)*rho)/(a+b+1), type = "l", ylim = c(0,1.5), main = paste0("obs. ",idx), xlab = "w", ylab = "f(w)")
+    abline(v=0,col="red")
+    points(obs_cover/100, 0.01, pch = 19, col = "blue", cex = 2)
+    legend("topright", legend = bquote(pi == .(round(100 * prob_suit, 2)) * "%"), bty = "n", cex = 0.8)
+    if (counter == 1) {
+      legend("topleft", legend = c("obs","pred"), col = c("blue","red"), pch=19, cex = 0.8)
+    }
+    
+    ### sample random points  
+    n <- 1000
+    V_sample <- rbeta(100,mu*rho,(1-mu)*rho)
+    #W_sample <- (a+1)*V_sample - a
+    W_sample <- (a+b+1)*V_sample - a
+    points(W_sample, 0.01 + rnorm(length(W_sample),0.02,0.002), col = "red", pch = 19, cex = 0.5)
+    #y_rep <- sapply(W_sample, function(x) (max(0,x)))
+    y_rep <- sapply(W_sample, function(x) (max(0,min(1,x))))
+    mean(y_rep)
+    mean(y_rep[y_rep > 0])
+    
+    counter <- counter + 1
+
+}
+
+######## same for scaled-sigmoid
+
+alpha.sam <- as.matrix(mod_scaled_sigmoid, pars = c("alpha"))
+beta.sam <- as.matrix(mod_scaled_sigmoid, pars = c("beta_1","beta_2"))
+
+alpha_pi.sam <- as.matrix(mod_scaled_sigmoid, pars = c("alpha_pi"))
+beta_pi.sam <- as.matrix(mod_scaled_sigmoid, pars = c("beta_pi_1","beta_pi_2"))
+
+alpha_rho.sam <- as.matrix(mod_scaled_sigmoid, pars = c("alpha_rho"))
+beta_rho.sam <- as.matrix(mod_scaled_sigmoid, pars = c("beta_rho_1","beta_rho_2"))
+
+alpha_pi.mean <- colMeans(alpha_pi.sam)
+beta_pi.mean <- colMeans(beta_pi.sam)
+
+alpha.mean <- colMeans(alpha.sam)
+beta.mean <- colMeans(beta.sam)
+
+alpha_rho.mean <- colMeans(alpha_rho.sam)
+beta_rho.mean <- colMeans(beta_rho.sam)
+
+# phi_mu.sam <- as.matrix(mod_test, pars = c("phi_mu"))
+# phi_pi.sam <- as.matrix(mod_test, pars = c("phi_pi"))
+# phi_mu.mean <- colMeans(phi_mu.sam)
+# phi_pi.mean <- colMeans(phi_pi.sam)
+
+
+# mu <- inv_logit(alpha.mean  + as.matrix(X.sec_ord)[idx, ] %*% beta.mean)
+# prob_suit <- inv_logit(alpha_pi.mean + as.matrix(X.sec_ord)[idx, ] %*% beta_pi.mean)
+# rho <- 1000*inv_logit(alpha_rho.mean + as.matrix(X.sec_ord)[idx, ] %*% beta_rho.mean)
+
+### spat_version
+# mu <- inv_logit(alpha.mean  + as.matrix(X.sec_ord)[idx, ] %*% beta.mean + P[idx,] %*% phi_mu.mean)
+# prob_suit <- inv_logit(alpha_pi.mean + as.matrix(X.sec_ord)[idx, ] %*% beta_pi.mean + P[idx,] %*% phi_pi.mean)
+
+#rho <- rho.mean
+
+# plot(seq(0,1, length=200),dbeta(seq(0,1,length=200),mu*rho,(1-mu)*rho), type = "l")
+# abline(v = a/2, col = "red")
+
+par(mfrow = c(1,1))
+
+a <- 1
+b <- 0.5
+
+x_grid <- seq(-a,1,length=200)
+plot(x_grid, dbeta((x_grid + a) /(a+1),mu*rho,(1-mu)*rho)/(a+1), type = "l", ylim = 0:1, main = sp_test)
+abline(v=0,col="red")
+points(obs_cover/100, 0.01, pch = 19, col = "blue", cex = 2)
+legend("topleft", legend = paste0("Pr(suitability) = ", round(100*prob_suit,2), "%"), bty = "n")
+
+### sample random points  
+n <- 1000
+V_sample <- rbeta(100,mu*rho,(1-mu)*rho)
+W_sample <- (a+1)*V_sample - a
+points(W_sample, 0.01 + rnorm(length(W_sample),0.02,0.002), col = "red", pch = 19, cex = 0.5)
+y_rep <- sapply(W_sample, function(x) (max(0,x)))
+mean(y_rep)
+mean(y_rep[y_rep > 0])
+
+
+### draw 32 data points and their distributions
+
+par(mfrow = c(4,4),
+    mar = c(2,3,2,1))
+
+y_test <- train[,sp_test]
+
+x_grid <- seq(-a,1,length=200)
+#x_grid <- seq(-a,1+b,length=200)
+
+set.seed(13)
+counter <- 1
+for (idx in sample(which(y_test > 0),16)) {
+  obs_cover <- y_test[idx]
+  
+  mu <- inv_logit(alpha.mean  + as.matrix(X.sec_ord)[idx, ] %*% beta.mean)
+  prob_suit <- inv_logit(alpha_pi.mean + as.matrix(X.sec_ord)[idx, ] %*% beta_pi.mean)
+  rho <- 1000*inv_logit(alpha_rho.mean + as.matrix(X.sec_ord)[idx, ] %*% beta_rho.mean)
+
+  plot(x_grid, dbeta((x_grid + a) /(a+1),mu*rho,(1-mu)*rho)/(a+1), type = "l", ylim = c(0,1.5), main = paste0("obs. ",idx), xlab = "w", ylab = "f(w)")
+  #plot(x_grid, dbeta((x_grid + a) /(a+b+1),mu*rho,(1-mu)*rho)/(a+b+1), type = "l", ylim = c(0,1.5), main = paste0("obs. ",idx), xlab = "w", ylab = "f(w)")
+  abline(v=0,col="red")
+  points(obs_cover/100, 0.01, pch = 19, col = "blue", cex = 2)
+  legend("topright", legend = bquote(pi == .(round(100 * prob_suit, 2)) * "%"), bty = "n", cex = 0.8)
+  if (counter == 1) {
+    legend("topleft", legend = c("obs","pred"), col = c("blue","red"), pch=19, cex = 0.8)
+  }
+  
+  ### sample random points  
+  n <- 1000
+  V_sample <- rbeta(100,mu*rho,(1-mu)*rho)
+  W_sample <- (a+1)*V_sample - a
+  #W_sample <- (a+b+1)*V_sample - a
+  points(W_sample, 0.01 + rnorm(length(W_sample),0.02,0.002), col = "red", pch = 19, cex = 0.5)
+  y_rep <- sapply(W_sample, function(x) (max(0,x)))
+  #y_rep <- sapply(W_sample, function(x) (max(0,min(1,x))))
+  mean(y_rep)
+  mean(y_rep[y_rep > 0])
+  
+  counter <- counter + 1
+}
+
+######## once more for scaled-sigmoid with rho > 2
+
+alpha.sam <- as.matrix(mod_scaled_sigmoid_min_2, pars = c("alpha"))
+beta.sam <- as.matrix(mod_scaled_sigmoid_min_2, pars = c("beta_1","beta_2"))
+
+alpha_pi.sam <- as.matrix(mod_scaled_sigmoid_min_2, pars = c("alpha_pi"))
+beta_pi.sam <- as.matrix(mod_scaled_sigmoid_min_2, pars = c("beta_pi_1","beta_pi_2"))
+
+alpha_rho.sam <- as.matrix(mod_scaled_sigmoid_min_2, pars = c("alpha_rho"))
+beta_rho.sam <- as.matrix(mod_scaled_sigmoid_min_2, pars = c("beta_rho_1","beta_rho_2"))
+
+alpha_pi.mean <- colMeans(alpha_pi.sam)
+beta_pi.mean <- colMeans(beta_pi.sam)
+
+alpha.mean <- colMeans(alpha.sam)
+beta.mean <- colMeans(beta.sam)
+
+alpha_rho.mean <- colMeans(alpha_rho.sam)
+beta_rho.mean <- colMeans(beta_rho.sam)
+
+
+### draw 32 data points and their distributions
+
+par(mfrow = c(4,4),
+    mar = c(2,3,2,1))
+
+y_test <- train[,sp_test]
+
+x_grid <- seq(-a,1,length=200)
+#x_grid <- seq(-a,1+b,length=200)
+
+set.seed(13)
+counter <- 1
+for (idx in sample(which(y_test > 0),16)) {
+  obs_cover <- y_test[idx]
+  
+  mu <- inv_logit(alpha.mean  + as.matrix(X.sec_ord)[idx, ] %*% beta.mean)
+  prob_suit <- inv_logit(alpha_pi.mean + as.matrix(X.sec_ord)[idx, ] %*% beta_pi.mean)
+  rho <- 2 + 998*inv_logit(alpha_rho.mean + as.matrix(X.sec_ord)[idx, ] %*% beta_rho.mean)
+  
+  plot(x_grid, dbeta((x_grid + a) /(a+1),mu*rho,(1-mu)*rho)/(a+1), type = "l", ylim = c(0,1.5), main = paste0("obs. ",idx), xlab = "w", ylab = "f(w)")
+  #plot(x_grid, dbeta((x_grid + a) /(a+b+1),mu*rho,(1-mu)*rho)/(a+b+1), type = "l", ylim = c(0,1.5), main = paste0("obs. ",idx), xlab = "w", ylab = "f(w)")
+  abline(v=0,col="red")
+  points(obs_cover/100, 0.01, pch = 19, col = "blue", cex = 2)
+  legend("topright", legend = bquote(pi == .(round(100 * prob_suit, 2)) * "%"), bty = "n", cex = 0.8)
+  if (counter == 1) {
+    legend("topleft", legend = c("obs","pred"), col = c("blue","red"), pch=19, cex = 0.8)
+  }
+  
+  ### sample random points  
+  n <- 1000
+  V_sample <- rbeta(100,mu*rho,(1-mu)*rho)
+  W_sample <- (a+1)*V_sample - a
+  #W_sample <- (a+b+1)*V_sample - a
+  points(W_sample, 0.01 + rnorm(length(W_sample),0.02,0.002), col = "red", pch = 19, cex = 0.5)
+  y_rep <- sapply(W_sample, function(x) (max(0,x)))
+  #y_rep <- sapply(W_sample, function(x) (max(0,min(1,x))))
+  mean(y_rep)
+  mean(y_rep[y_rep > 0])
+  
+  counter <- counter + 1
+}
+
+
+################################### DELETE??? #########################################
+
+### for logrho model
+
+alpha.sam <- as.matrix(mod_logrho, pars = c("alpha"))
+beta.sam <- as.matrix(mod_logrho, pars = c("beta_1","beta_2"))
+
+alpha_pi.sam <- as.matrix(mod_logrho, pars = c("alpha_pi"))
+beta_pi.sam <- as.matrix(mod_logrho, pars = c("beta_pi_1","beta_pi_2"))
+
+alpha_rho.sam <- as.matrix(mod_logrho, pars = c("alpha_rho"))
+beta_rho.sam <- as.matrix(mod_logrho, pars = c("beta_rho_1","beta_rho_2"))
+
+alpha_pi.mean <- colMeans(alpha_pi.sam)
+beta_pi.mean <- colMeans(beta_pi.sam)
+
+alpha.mean <- colMeans(alpha.sam)
+beta.mean <- colMeans(beta.sam)
+
+alpha_rho.mean <- colMeans(alpha_rho.sam)
+beta_rho.mean <- colMeans(beta_rho.sam)
+
+### draw 32 data points and their distributions
+
+par(mfrow = c(4,4))
+y_test <- train[,sp_test]
+
+x_grid <- seq(-a,1,length=200)
+
+set.seed(13)
+for (idx in sample(which(y_test > 50),16)) {
+  obs_cover <- y_test[idx]
+  
+  mu <- inv_logit(alpha.mean  + as.matrix(X.sec_ord)[idx, ] %*% beta.mean)
+  prob_suit <- inv_logit(alpha_pi.mean + as.matrix(X.sec_ord)[idx, ] %*% beta_pi.mean)
+  rho <- exp(alpha_rho.mean + as.matrix(X.sec_ord)[idx, ] %*% beta_rho.mean)
+  
+  plot(x_grid, dbeta((x_grid + a) /(a+1),mu*rho,(1-mu)*rho)/(a+1), type = "l", ylim = 0:1, main = sp_test)
+  abline(v=0,col="red")
+  points(obs_cover/100, 0.01, pch = 19, col = "blue", cex = 2)
+  legend("topleft", legend = paste0("Pr(suitability) = ", round(100*prob_suit,2), "%"), bty = "n")
+  
+  ### sample random points  
+  n <- 1000
+  V_sample <- rbeta(100,mu*rho,(1-mu)*rho)
+  W_sample <- (a+1)*V_sample - a
+  points(W_sample, 0.01 + rnorm(length(W_sample),0.02,0.002), col = "red", pch = 19, cex = 0.5)
+  y_rep <- sapply(W_sample, function(x) (max(0,x)))
+  mean(y_rep)
+  mean(y_rep[y_rep > 0])
+}
+
+
+### for hurdle model
+mod_hurdle <- mod.ZIbeta
+
+alpha.sam <- as.matrix(mod_hurdle, pars = c("alpha"))
+beta.sam <- as.matrix(mod_hurdle, pars = c("beta_1","beta_2"))
+
+alpha_pi.sam <- as.matrix(mod_hurdle, pars = c("alpha_pi"))
+beta_pi.sam <- as.matrix(mod_hurdle, pars = c("beta_pi_1","beta_pi_2"))
+
+alpha_rho.sam <- as.matrix(mod_hurdle, pars = c("alpha_rho"))
+beta_rho.sam <- as.matrix(mod_hurdle, pars = c("beta_rho_1","beta_rho_2"))
+
+alpha_pi.mean <- colMeans(alpha_pi.sam)
+beta_pi.mean <- colMeans(beta_pi.sam)
+
+alpha.mean <- colMeans(alpha.sam)
+beta.mean <- colMeans(beta.sam)
+
+alpha_rho.mean <- colMeans(alpha_rho.sam)
+beta_rho.mean <- colMeans(beta_rho.sam)
+
+# draw
+par(mfrow = c(4,4))
+y_test <- train[,sp_name]
+
+x_grid <- seq(0,1,length=200)
+
+set.seed(13)
+for (idx in sample(which(y_test > 10),16)) {
+  obs_cover <- y_test[idx]
+  
+  mu <- inv_logit(alpha.mean  + as.matrix(X.sec_ord)[idx, ] %*% beta.mean)
+  prob_suit <- inv_logit(alpha_pi.mean + as.matrix(X.sec_ord)[idx, ] %*% beta_pi.mean)
+  #rho <- 250*inv_logit(alpha_rho.mean + as.matrix(X.sec_ord)[idx, ] %*% beta_rho.mean)
+  rho <- exp(alpha_rho.mean + as.matrix(X.sec_ord)[idx, ] %*% beta_rho.mean)
+  
+  plot(x_grid, dbeta(x_grid,mu*rho,(1-mu)*rho)/(a+1), type = "l", ylim = 0:1, main = sp_test)
+  abline(v=0,col="red")
+  points(obs_cover/100, 0.01, pch = 19, col = "blue", cex = 2)
+  legend("topleft", legend = paste0("Pr(suitability) = ", round(100*prob_suit,2), "%"), bty = "n")
+  
+  ### sample random points  
+  n <- 1000
+  y_sample <- rbeta(100,mu*rho,(1-mu)*rho)
+  #W_sample <- (a+1)*V_sample - a
+  points(y_sample, 0.01 + rnorm(length(y_sample),0.02,0.002), col = "red", pch = 19, cex = 0.5)
+  #y_rep <- sapply(W_sample, function(x) (max(0,x)))
+  #mean(y_rep)
+  #mean(y_rep[y_rep > 0])
+}
+
+
+
+
