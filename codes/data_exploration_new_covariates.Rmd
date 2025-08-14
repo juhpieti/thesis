@@ -75,7 +75,7 @@ for (year in years) {
 }
 ```
 
-2019-2021 combined with $n=1000$
+2020-2021 combined with $n=1000$
 
 ```{r}
 set.seed(123)
@@ -140,7 +140,7 @@ for (year in 2020:2021) {
 
 
 
-2020 or 2021 or combined?
+2020-2021 with n = 500
 
 ```{r}
 set.seed(123)

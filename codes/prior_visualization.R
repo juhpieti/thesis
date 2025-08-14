@@ -1,13 +1,16 @@
-### Script to visually examine priors for covariance matrix parameters
+### SCRIPT TO VISUALLY EXAMINE PRIOR CHOICES FOR THE MODEL ###
 
+# pdf of inverse gamma
 dinv_gamma <- function(y,a,b) {
   return( ((b^a) / gamma(a)) * y^(-(a+1))*exp(-b/y)  )
 }
 
+# cdf of inferse gamma
 pinvgamma <- function(x, shape, scale) {
   pgamma(scale / x, shape, lower.tail = FALSE)  # Complement of upper incomplete gamma function
 }
 
+# pdf of student-t 
 dstudent <- function(y,v,u,s) {
   upper <- gamma((v+1)/2)
   lower <- (sqrt(pi*v*s^2))*gamma(v/2)
@@ -16,47 +19,22 @@ dstudent <- function(y,v,u,s) {
   return(const*((1+((y-u)^2)/(v*s^2))^c))
 }
 
-### 1) priors for beta_1 and log(-beta_2)
+### 1) priors for beta coefficients
 ### N(0,2)
 
 par(mfrow = c(1,2))
 n_rep <- 1000
 beta_1 <- rnorm(n_rep,0,sqrt(2))
-logneg_beta_2 <- rnorm(n_rep,0,1)
-beta_2 <- -exp(logneg_beta_2)
 hist(beta_1, breaks = 40, probability = TRUE)
-hist(beta_2, breaks = 40, probability = TRUE)
 
-### 2) rho & covariance function magnitudes
-### since the variance of beta distribution depends inversely on rho, I think it is logical to give it a prior with heavy tails
+### 2) covariance function parameters
 
-par(mfrow = c(1,1))
-eps <- c(0.01,0.05,0.1,0.5)
-s2_grid <- seq(0.01,10.01,length=500)
-plot(NULL, xlim = c(min(s2_grid),max(s2_grid)), ylim = c(0,0.6))
-
-cols <- rainbow(length(eps))
-for (i in 1:length(eps)) {
-  e <- eps[i]
-  lines(s2_grid, dinv_gamma(s2_grid,e,e), col = cols[i])
-}
-
-legend("topright", legend = paste0("Inv-Gamma(",eps,",",eps,")"), lty = 1, col = cols)
-
-### draw histogram of jarnos half-student-t(0,0.1) with v=4
-lines(s2_grid,2*dstudent(s2_grid,4,0,0.1))
-
-
-############ S2
-
+### S2 (magnitude)
 s2_grid <- seq(0.01,10.01,length=500)
 
 
-### inv_gamma(a,b) vs half-cauchy for s2?
+### inv_gamma(a,b) vs half-cauchy(0,t) for s2?
 ### e.g. inv_gamma(2,1) vs half-cauchy(0,1)
-### visualize jeffreys
-p_jeffreys <- 1/s2_grid
-p_jeffreys <- p_jeffreys/sum(p_jeffreys)
 plot(NULL, xlim = c(0,10), ylim = c(0,0.8))
 lines(s2_grid, 2*dcauchy(s2_grid,0,sqrt(0.001)),col="red")
 lines(s2_grid,2*dstudent(s2_grid,2,0,sqrt(0.1)), col = "orange")
@@ -65,44 +43,10 @@ lines(s2_grid,2*dstudent(s2_grid,2,0,1.5), col = "blue")
 lines(s2_grid,2*dstudent(s2_grid,4,0,1.5), col =  "darkgreen")
 # draw jarnos student-t
 lines(s2_grid, 2*dstudent(sqrt(s2_grid),4,0,0.1)/(2*sqrt(s2_grid)), col = "green")
-#lines(s2_grid, p_jeffreys, col = "blue")
-#lines(s2_grid, dinv_gamma(s2_grid,0.5,0.5), col = "orange")
 
 ### probability that s2 is under 10
 pinvgamma(5,2,1) #0.99
 pcauchy(5,0,sqrt(0.001)) - pcauchy(-5,0,sqrt(0.001)) #0.93
-
-
-############ 1/rho
-
-inv_rho_grid <- seq(0.01,2.01,length=500)
-
-
-### student-t(df=4,0,?)
-plot(NULL, xlim = c(0,2), ylim = c(0,2))
-lines(inv_rho_grid,2*dstudent(inv_rho_grid,2,0,0.1), col = "orange")
-lines(inv_rho_grid,2*dstudent(inv_rho_grid,4,0,0.1), col = "purple")
-abline(v=1, col = "red", lty = 2)
-
-# draw jarnos student-t
-lines(s2_grid, 2*dstudent(sqrt(s2_grid),4,0,0.1)/(2*sqrt(s2_grid)), col = "green")
-
-
-#### RHO
-### half-cauchy(0,sqrt(5)) vs inv_gamma(0.5, 0.5) for rho?
-rho_grid <- seq(0,100,length=500)
-plot(NULL, xlim = c(min(rho_grid),max(rho_grid)), ylim = c(0,0.2))
-lines(rho_grid, 2*dcauchy(rho_grid,0,sqrt(10)), col = "green")
-lines(rho_grid, 2*dcauchy(rho_grid,0,5),col="red")
-lines(rho_grid, 2*dnorm(rho_grid,0,sqrt(10)), col = "blue")
-
-
-
-
-### probability that rho is under 100
-pinvgamma(100,0.1,0.1) #0.92
-pcauchy(100,0,sqrt(10)) - pcauchy(-100,0,sqrt(10)) #0.98
-
 
 ### lengthscale?
 ### the minimum distance is 20km between grid points, and the maximum is 580km
@@ -122,14 +66,39 @@ lines(l_grid,dinv_gamma(l_grid,1,1), col = "green")
 
 abline(v = 40)
 
+# calculate probabilities for length-scale being less than ?
 pinvgamma(1000,1,1) #0.99
 pcauchy(100,8,25) - pcauchy(-100,8,25) #0.95
 
-
+# calculate expectations
 integrate(function(x) (x*2*dstudent(x,4,10,10)),0,500)
 integrate(function(x) x*2*dcauchy(x,8,50),0,500)
 
+#### RHO
+### since the variance of beta distribution depends inversely on rho, I think it is logical to give it a prior with heavy tails
 
+### half-cauchy(0,sqrt(5)) vs inv_gamma(0.5, 0.5) for rho?
+rho_grid <- seq(0,100,length=500)
+plot(NULL, xlim = c(min(rho_grid),max(rho_grid)), ylim = c(0,0.2))
+lines(rho_grid, 2*dcauchy(rho_grid,0,sqrt(10)), col = "green")
+lines(rho_grid, 2*dcauchy(rho_grid,0,5),col="red")
+lines(rho_grid, 2*dnorm(rho_grid,0,sqrt(10)), col = "blue")
+
+### probability that rho is under 100
+pinvgamma(100,0.1,0.1) #0.92
+pcauchy(100,0,sqrt(10)) - pcauchy(-100,0,sqrt(10)) #0.98
+
+### 1/rho
+### it could also make sense to give prior for 1/rho 
+inv_rho_grid <- seq(0.01,2.01,length=500)
+
+### student-t(df=4,0,?)
+plot(NULL, xlim = c(0,2), ylim = c(0,2))
+lines(inv_rho_grid,2*dstudent(inv_rho_grid,2,0,0.1), col = "orange")
+lines(inv_rho_grid,2*dstudent(inv_rho_grid,4,0,0.1), col = "purple")
+abline(v=1, col = "red", lty = 2)
+
+################################################### EXTRA ###########################################
 ### draw plot of joint prior for l and s2
 
 l_grid <- seq(0,500,length=100)
