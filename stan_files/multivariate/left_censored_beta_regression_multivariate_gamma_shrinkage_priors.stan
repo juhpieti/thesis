@@ -48,12 +48,22 @@ parameters {
   // latent factors & species loadings
   matrix[N,n_f] Z; // n_f latent factors for each sampling location
   matrix[n_f,J] Lambda; // species loadings
+  
+  // gamma shrinkage prior parameters
+  matrix<lower=0>[n_f,J] GSP_Phi;
+  vector<lower=0>[n_f] GSP_delta;
 }
 
 transformed parameters{
   matrix[N,J] Mu; // gather the mean parameters for beta distribution
   for (n in 1:N) {
     Mu[n] = inv_logit(to_row_vector(alpha) + X[n]*append_row(beta_1,beta_2) + Z[n]*Lambda); // intercept + fixed effects + random effects
+  }
+  
+  vector[n_f] GSP_tau;
+  GSP_tau[1] = GSP_delta[1];
+  for (k in 2:n_f) {
+    GSP_tau[k] = GSP_tau[k-1] * GSP_delta[k]; 
   }
 }
 
@@ -67,7 +77,18 @@ model {
   
   // factor loadings
   to_vector(Z) ~ normal(0,1);
-  to_vector(Lambda) ~ normal(0,1);
+  
+  // gamma shrinkage prior for Lambda
+  //to_vector(Lambda) ~ normal(0,1);
+  GSP_delta[1] ~ gamma(50,1);
+  GSP_delta[2:n_f] ~ gamma(50,1);
+  to_vector(GSP_Phi) ~ gamma(3/2,3/2);
+  
+  for (k in 1:n_f) {
+    for (j in 1:J) {
+      Lambda[k,j] ~ normal(0,1/sqrt(GSP_Phi[k,j]*GSP_tau[k]));
+    }
+  }
   
   // likelihood terms
   for (i in 1:N) {
@@ -89,4 +110,6 @@ generated quantities {
     log_lik[i] = ll;
   }
 }
+
+
 

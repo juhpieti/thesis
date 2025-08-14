@@ -42,6 +42,12 @@ parameters {
   matrix[n_var/2,J] beta_1; // first order terms
   matrix<upper=0>[n_var/2,J] beta_2; // second order terms, restricted negative (bell-shaped curves based on ecological niche theory)
   
+  // hierarchical priors for beta
+  vector[n_var/2] mu_beta_1; // mean for first order terms
+  vector[n_var/2] mu_beta_2; // mean for second order terms
+  vector<lower=0>[n_var/2] s_beta_1; // standard deviance for first order terms
+  vector<lower=0>[n_var/2] s_beta_2; // standard deviance for second order terms
+  
   vector[J] alpha; // intercept terms
   vector<lower=0>[J] rho; // scale parameters for beta distribution
   
@@ -59,8 +65,20 @@ transformed parameters{
 
 model {
   // priors for coefficients
-  to_vector(beta_1) ~ normal(0,sqrt(1));
-  to_vector(beta_2) ~ normal(0,sqrt(1));
+  for (v in 1:n_var/2) {
+    beta_1[v] ~ normal(mu_beta_1[v],s_beta_1[v]);
+    beta_2[v] ~ normal(mu_beta_2[v],s_beta_2[v]);
+  }
+  // hyperpriors
+  mu_beta_1 ~ normal(0,1);
+  mu_beta_2 ~ normal(0,1);
+  s_beta_1 ~ cauchy(0,1);
+  s_beta_2 ~ cauchy(0,1);
+  //s_beta_1 ~ student_t(4,0,1);
+  //s_beta_2 ~ student_t(4,0,1);
+  //s_beta_1 ~ exponential(1);
+  //s_beta_2 ~ exponential(1);
+  
 
   alpha ~ normal(0,sqrt(2)); // intercepts
   rho ~ cauchy(0,sqrt(10)); // precision parameter
@@ -89,4 +107,3 @@ generated quantities {
     log_lik[i] = ll;
   }
 }
-
