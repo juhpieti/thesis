@@ -29,6 +29,9 @@ df_sub <- train_n1000
 load("data/estonia_new/train/train_2020_2021_n2000.Rdata")
 df_sub <- train_n2000
 
+load("data/estonia_new/train/train_2020_2021_n100.Rdata")
+df_sub <- train_n100
+
 colnames(df_sub)
 colSums(df_sub[,20:38] > 0)
 
@@ -42,9 +45,13 @@ X <- train[,11:19]
 X$light_bottom <- exp(-1.7*X$depth / X$zsd)
 X <- X[,-which(colnames(X) == "zsd")] #remove secchi depth since it is not interesting for modeling in itself
 
-X.scaled <- scale_covariates(X)
-### add the second order terms
-X.sec_ord <- add_second_order_terms(X.scaled,colnames(X.scaled))
+#take a subset of covariates
+#cov_names <- c("depth","o2_bottom","bottomT","so_bottom","light_bottom")
+#X <- X[,cov_names]
+
+
+X.scaled <- scale_covariates(X) #scale the covariates
+X.sec_ord <- add_second_order_terms(X.scaled,colnames(X.scaled)) #add second order terms
 
 # load in the predictive grid
 load("data/estonia_new/predictive_grid_1km_all_variables_2021_july.Rdata")
@@ -56,17 +63,18 @@ predictive_grid <- vect("data/estonia_new/predictive_grid_1km_all_variables_2021
 # loop over the species, save the models (LEFT-CENSORED)
 sp_names <- colnames(train)[20:35]
 n_chains <- 4
-n_iter <- 250
+n_iter <- 2000
 subfolder <- paste0("n_",nrow(X))
 
 model_subfolder <- "" # model where rho is fixed
 model_subfolder <- "scaled_sigmoid/" # model where log(rho) = a + XB w/ second order terms
 
-for (model_subfolder in c("","scaled_sigmoid/")) {
+#for (model_subfolder in c("","scaled_sigmoid/")) {
+for (model_subfolder in c("")) {  
   
   stan_file_loc <- paste0("stan_files/",model_subfolder,"left_censored_beta_regression.stan")
   
-  for (sp_name in sp_names[4]) {
+  for (sp_name in sp_names[c(4,5,8,12)]) {
     y <- train[,sp_name]
     y.01 <- y/100
     
@@ -84,6 +92,7 @@ for (model_subfolder in c("","scaled_sigmoid/")) {
     sp_name_modified <- gsub("/","_",sp_name_modified)
     
     f_name <- paste0("models/",model_subfolder,subfolder,"/M1/",sp_name_modified,".rds")
+    #f_name <- paste0("models/",model_subfolder,subfolder,"/9_covariates/M1/",sp_name_modified,".rds")
     
     saveRDS(mod.beta, f_name)
   }

@@ -93,7 +93,7 @@ save(P,observed_grid_cells.df,file = "data/estonia_new/for_remote_computer/P_and
 # loop over the species, save the models
 sp_names <- colnames(train)[20:35]
 n_chains <- 4
-n_iter <- 1000
+n_iter <- 250
 
 subfolder <- paste0("n_",nrow(train))
 
@@ -102,11 +102,12 @@ model_subfolder <- "scaled_sigmoid/"
 
 stan_file_loc <- paste0("stan_files/",model_subfolder,"zero_inflated_left_censored_beta_regression_spatial.stan")
 
-for (model_subfolder in c("","scaled_sigmoid/")) {
+#for (model_subfolder in c("","scaled_sigmoid/")) {
+for (model_subfolder in c("")) {
   
   stan_file_loc <- paste0("stan_files/",model_subfolder,"zero_inflated_left_censored_beta_regression_spatial.stan")
   
-  for (sp_name in sp_names[4]) {
+  for (sp_name in sp_names[c(4,5,8,12)]) {
     y <- train[,sp_name]
     y.01 <- y/100
     
@@ -129,6 +130,7 @@ for (model_subfolder in c("","scaled_sigmoid/")) {
     sp_name_modified <- gsub("/","_",sp_name_modified)
     
     f_name <- paste0("models/",model_subfolder,subfolder,"/M4/",sp_name_modified,".rds")
+    #f_name <- paste0("models/",model_subfolder,subfolder,"/9_covariates/M4/",sp_name_modified,".rds")
     
     saveRDS(mod.ZIBeta_spat, f_name)
   }

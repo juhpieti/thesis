@@ -72,11 +72,12 @@ model_subfolder <- "scaled_sigmoid/"
 
 stan_file_loc <- paste0("stan_files/",model_subfolder,"zero_inflated_left_censored_beta_regression.stan")
 
-for (model_subfolder in c("", "scaled_sigmoid/")) {
+#for (model_subfolder in c("", "scaled_sigmoid/")) {
+for (model_subfolder in c("")) {
   
   stan_file_loc <- paste0("stan_files/",model_subfolder,"zero_inflated_left_censored_beta_regression.stan")
   
-  for (sp_name in sp_names[4]) {
+  for (sp_name in sp_names[c(4,5,8,12)]) {
     y <- train[,sp_name]
     y.01 <- y/100
     
@@ -100,6 +101,7 @@ for (model_subfolder in c("", "scaled_sigmoid/")) {
     sp_name_modified <- gsub("/","_",sp_name_modified)
     
     f_name <- paste0("models/",model_subfolder,subfolder,"/M2/",sp_name_modified,".rds")
+    #f_name <- paste0("models/",model_subfolder,subfolder,"/9_covariates/M2/",sp_name_modified,".rds")
     
     saveRDS(mod.ZIbeta, f_name)
   }
