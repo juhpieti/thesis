@@ -1,9 +1,6 @@
-### MODEL 1: left-censored beta-regression with spatial random effects
-### this script
-# 1) fits
-# 2) plots responses
-# 3) plots predicted maps
-# 4) ?
+###########################################################
+### SCRIPT TO FIT SPATIAL LEFT-CENSORED BETA REGRESSION ###
+###########################################################
 
 # load in packages
 library(terra)
@@ -15,16 +12,21 @@ library(rstan)
 options(mc.cores = parallel::detectCores())
 rstan_options(auto_write = TRUE)
 
-# load in helper functions
+# load in helper/utility functions
 source("codes/helpers.R")
 
-### DATA PREPARATION
-# load in the training data
+# load in the training data (there are different sizes of training data)
 load("data/estonia_new/train/train_2020_2021_n500.Rdata")
 df_sub <- train_n500
 
-load("data/estonia_new/train/train_2020_2021_n2000.Rdata")
-df_sub <- train_n2000
+# load("data/estonia_new/train/train_2020_2021_n1000.Rdata")
+# df_sub <- train_n1000
+# 
+# load("data/estonia_new/train/train_2020_2021_n2000.Rdata")
+# df_sub <- train_n2000
+# 
+# load("data/estonia_new/train/train_2020_2021_n100.Rdata")
+# df_sub <- train_n100
 
 colnames(df_sub)
 colSums(df_sub[,20:38] > 0)
@@ -33,77 +35,71 @@ colSums(df_sub[,20:38] > 0)
 train <- df_sub # more comfortable name
 train <- train[,!(colnames(train) %in% c("Furcellaria lumbricalis loose form","Tolypella nidifica","Chara tomentosa"))]
 
-# prepare the covariate matrix
+### prepare the covariate matrix
 X <- train[,11:19]
-#X$depth_to_secchi <- X$depth / X$zsd # add secchi/depth for a variable representing seafloor light level
-X$light_bottom <- exp(-1.7*X$depth / X$zsd)
+X$light_bottom <- exp(-1.7*X$depth / X$zsd) #approximate light level at the bottom
 X <- X[,-which(colnames(X) == "zsd")] #remove secchi depth since it is not interesting for modeling in itself
 
-X.scaled <- scale_covariates(X)
-### add the second order terms
-X.sec_ord <- add_second_order_terms(X.scaled,colnames(X.scaled))
+X.scaled <- scale_covariates(X) #scale the covariates
+X.sec_ord <- add_second_order_terms(X.scaled,colnames(X.scaled)) #add second order terms
 
-### PREPARE THE COORDINATES
-# load in the predictive grid
-load("data/estonia_new/predictive_grid_1km_all_variables_2021_july.Rdata")
-dim(pred_grid_1km_2021_july_df)
-colnames(pred_grid_1km_2021_july_df)
-
-predictive_grid <- vect("data/estonia_new/predictive_grid_1km_all_variables_2021_july/predictive_grid_1km_all_variables_2021_july.shp")
-
-### load in spatial grid
+### PREPARE THE DATA FOR SPATIAL MODELING
+### load in the coarse spatial random effect grid
 spatial_grid <- vect("data/estonia_new/spatial_random_effect_grid_20km/spatial_random_effect_grid_20km.shp")
 
+# prepare a matrix of grid centers and their locations (TM35FIN coordinates)
 grid_centers <- centroids(spatial_grid)
 grid_centers.df <- as.data.frame(grid_centers, geom = "XY")
 grid_centers.df <- grid_centers.df[,c("x","y")]
+dim(grid_centers.df) # there are m = 191 grid cells
 
-dim(grid_centers.df) # there are m = 182 grid cells
+# turn the training data into terra-vector
+train.vect <- vect(train, geom = c("x","y"), crs = "EPSG:3067")
 
-### create a P matrix (nxm) matrix that tells to which grid cell each observation belongs to
-estonia_sub.vect <- vect(train, geom = c("x","y"), crs = "EPSG:3067")
-
-nearest_grid_center <- nearest(estonia_sub.vect, grid_centers)
+# find the spatial grid cell for each sampling location
+nearest_grid_center <- nearest(train.vect, grid_centers)
 nearest_grid_center.df <- as.data.frame(nearest_grid_center)
 
 # n-length vector indicating the ID of the nearest grid center
 nearest_grid_center.vec <- nearest_grid_center.df$to_id
 
-# take the indexes of grid cells that has observations in them
+# take the indexes of grid cells that have observations in them
 observed_grid_cells <- unique(nearest_grid_center.vec)
 observed_grid_cells.df <- grid_centers.df[observed_grid_cells,c("x","y")]
 
-# create the P matrix
+# create matrix P (N x n_grid_cells), where i:th row indicates the spatial grid cell that i:th sampling point is located in
+# so each row of matrix P sums up to 1
 P <- matrix(0,ncol=length(observed_grid_cells),nrow=nrow(train))
 colnames(P) <- rownames(observed_grid_cells.df)
-for (i in 1:nrow(X)) {
-  P[i,as.character(nearest_grid_center.vec[i])] <- 1 
+for (i in 1:nrow(estonia_sub)) {
+  P[i,as.character(nearest_grid_center.vec[i])] <- 1
 }
 
-### put the coordinates in km instead of meters
+# turn the coordinates in km instead of meters
 observed_grid_cells.df <- observed_grid_cells.df/1000
 
-# loop over the species, save the models
-sp_names <- colnames(train)[20:35]
+### Prepare for stan
 n_chains <- 4
-n_iter <- 250
+n_iter <- 2000
 
-subfolder <- paste0("n_",nrow(train))
-
-model_subfolder <- ""
-model_subfolder <- "scaled_sigmoid/"
-
-stan_file_loc <- paste0("stan_files/",model_subfolder,"left_censored_beta_regression_spatial.stan")
+# loop over the species and save the models
+sp_names <- colnames(train)[20:35]
+subfolder <- paste0("n_",nrow(X))
+model_subfolder <- "" # model where rho is fixed
+model_subfolder <- "scaled_sigmoid/" # model where log(rho) = a + XB w/ second order terms
 
 #for (model_subfolder in c("","scaled_sigmoid/")) {
 for (model_subfolder in c("")) {
   
+  # location of the stan file depends on whether rho is common (stan_files/MODEL.stan) or modeled with covariates (stan_files/scaled_sigmoid/MODEL.stan)
   stan_file_loc <- paste0("stan_files/",model_subfolder,"left_censored_beta_regression_spatial.stan")
   
-  for (sp_name in sp_names[c(4,5,8,12)]) {
+  for (sp_name in sp_names[c(4,5,8,12)]) { #possibly select a subset of species
+    # select and scale percent cover data
     y <- train[,sp_name]
     y.01 <- y/100
     
+    # prepare data for stan
     dat.beta_spat <- list(N = nrow(X.sec_ord),
                           n_var = ncol(X.sec_ord),
                           n_obs_grid = ncol(P),
@@ -113,8 +109,7 @@ for (model_subfolder in c("")) {
                           a = 1,
                           P = P)
     
-    
-    
+    # fit the model
     mod.beta_spat <- stan(stan_file_loc,
                           data = dat.beta_spat, chains = n_chains, iter = n_iter, seed = 42,
                           pars = c("mu","z"), include = FALSE)
@@ -122,93 +117,12 @@ for (model_subfolder in c("")) {
     sp_name_modified <- gsub(" ","_",sp_name)
     sp_name_modified <- gsub("/","_",sp_name_modified)
     
+    # set the location to save the model output
     f_name <- paste0("models/",model_subfolder,subfolder,"/M3/",sp_name_modified,".rds")
     #f_name <- paste0("models/",model_subfolder,subfolder,"/9_covariates/M3/",sp_name_modified,".rds")
     
     saveRDS(mod.beta_spat, f_name)
   }
 }
-
-
-################ from this onwards to analyse_results.R
-
-#load in the models
-mod_amphi.spat <- readRDS("models/M3/Amphibalanus_improvisus.rds")
-
-pred_list_m3 <- predict_spatial_beta_regression(mod_amphi.spat,pred_grid_1km_2021_july_df[,2:10],X,
-                                                     pred_grid_1km_2021_july_df[,c("x","y")],
-                                                     grid_centers.df/1000, observed_grid_cells.df,10,1)
-
-pred_list_m3 <- predict_spatial_beta_regression(mod_amphi.spat,
-                                                cbind(pred_grid_1km_2021_july_df[,2:10],exp(-1.7*pred_grid_1km_2021_july_df$depth / pred_grid_1km_2021_july_df$zsd)),
-                                                X,
-                                                pred_grid_1km_2021_july_df[,c("x","y")],
-                                                grid_centers.df/1000, observed_grid_cells.df,10,1)
-
-
-
-locs <- pred_grid_1km_2021_july_df[,c("x","y")]
-vals <- colMeans(pred_list_m3$EY_sam)
-vars <- apply(pred_list_m3$EY_sam,2,var)
-#vals <- colMeans(pred_list_spatial$y_sam)
-vals.scaled <- vals/max(vals)
-test_df <- as.data.frame(cbind(locs, vals, vars, vals.scaled))
-
-### try the acumulative thing
-head(test_df)
-test_df_ordered <- test_df[order(-test_df$vals), ]
-test_df_ordered$hotspot <- 1
-
-# find when 90% of the expected value is reached
-tot_sum <- sum(test_df_ordered$vals)
-idx <- which(cumsum(test_df_ordered$vals) > 0.7*tot_sum)[1]
-
-# set all outside to be non-hotspot
-test_df_ordered[idx:nrow(test_df_ordered),"hotspot"] <- 0
-
-
-test_vect <- vect(test_df_ordered, geom=c("x","y"), crs = "EPSG:3067")
-test_rast <- rast(ext = ext(predictive_grid), res = 1000, crs = "EPSG:3067")
-r <- rasterize(test_vect, test_rast, field = "vals")
-r.vars <- rasterize(test_vect, test_rast, field = "vars")
-r.hotspot <- rasterize(test_vect, test_rast, field = "hotspot")
-r.scaled <- rasterize(test_vect, test_rast, field = "vals.scaled") 
-
-plot(r, colNA = "lightgrey", main = "M3 (w/o ZI,  w/ RE)",plg = list(title = "E[coverage]"),
-     xlab = "Easting (m)", ylab = "Northing (m)")
-#plot(r.scaled, colNA = "lightgrey", main = "Amphi rel. exp. coverage: M3 (w/o ZI,  w/ RE)")
-plot(r.hotspot, colNA = "lightgrey", main = "M3 (w/o ZI, w/ RE)", col = c("red","blue"),
-     plg = list(title = "hotspot", legend = c("no","yes")),
-     xlab = "Easting (m)", ylab = "Northing (m)")
-
-# plot variance
-plot(r.vars,colNA="lightgrey", main = "Amphi variance: M3 (w/o ZI, w/ RE)")
-
-
-### plot the random effects
-locs <- pred_grid_1km_2021_july_df[,c("x","y")]
-vals <- colMeans(pred_list_m3$phi_pred_sam)
-test_df <- as.data.frame(cbind(locs, vals))
-
-test_vect <- vect(test_df, geom = c("x","y"), crs = "EPSG:3067")
-test_rast <- rast(ext = ext(predictive_grid), res = 1000, crs = "EPSG:3067")
-r.phi <- rasterize(test_vect, test_rast, field = "vals")
-
-par(mfrow = c(1,1))
-plot(r.phi, colNA = "lightgrey", main = "Amhpi spatial REs: M3 (w/o ZI, w/ RE)")
-plot(r.phi, colNA = "lightgrey", main = "Chara spatial REs: M3 (w/o ZI, w/ RE)")
-
-
-### difference with M1
-vals <- colMeans(pred_list_spatial$EY_sam) - colMeans(pred_list$EY_sam)
-#vals <- colMeans(pred_list_spatial$y_sam) - colMeans(pred_list$y_sam)
-test_df <- as.data.frame(cbind(locs, vals))
-test_vect <- vect(test_df, geom = c("x","y"), crs = "EPSG:3067")
-test_rast <- rast(ext = ext(predictive_grid), res = 1000, crs = "EPSG:3067")
-r.diff <- rasterize(test_vect, test_rast, field = "vals")
-
-par(mfrow = c(1,1))
-plot(r.diff, colNA = "lightgrey", main = "Amphi M3-M1 expected coverage")
-plot(r.diff, colNA = "lightgrey", main = "Chara M3-M1 expected coverage")
 
 
