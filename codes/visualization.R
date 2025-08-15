@@ -1,11 +1,12 @@
-### script to visualize the data used for modeling
-### this is a subset (n = 500) using year 2022 in the estonia data
+##########################################################
+### SCRIPT TO MAKE VISUALIZATIONS OF THE TRAINING DATA ###
+### n=500 from summer months in 2020-2021              ###
+##########################################################
 
 #load in packages
 library(terra)
 
 #load in the training data
-#load("data/estonia_new/train_2020_2021.Rdata") #df_sub
 load("data/estonia_new/train/train_2020_2021_n500.Rdata")
 df_sub <- train_n500
 
@@ -18,37 +19,32 @@ estonia_sub <- estonia_sub[,!(colnames(estonia_sub) %in% c("Furcellaria lumbrica
 
 
 sp_list <- colnames(estonia_sub)[20:35]
-sp_list <- sp_list[c(2:6,10,13:14,7,9,11:12,15:16,1,8)]
+sp_list <- sp_list[c(2:6,10,13:14,7,9,11:12,15:16,1,8)] # order by the type of species (Vascular plants,  Algae etc.)
 
 # plot the prevalences and the distribution of coverages for each species
 prevalences <- round(100*colMeans(estonia_sub[,sp_list] > 0),2)
 
 #manual breaks
 bin_width <- 5
-breaks <- c(-bin_width, 0, seq(bin_width, 100, by=bin_width))
+breaks <- c(-bin_width, 0, seq(bin_width, 100, by=bin_width)) #create own bar for zero observations by starting at -bin_width
 
 im_width <- 800
 im_height <- 600
 subfolder <- paste0("n_",nrow(df_sub))
 
 png(paste0("plots/estonia_new/training_data/",subfolder,"/counts_with_prevalences.png"), width = im_width, height = im_height)
-
 par(mfrow = c(4,4),
     mar = c(4,4,2,1))
-
 for (sp_name in sp_list) {
   hist(estonia_sub[,sp_name], main = sp_name, xlab = "coverage (%)", ylab = "count", ylim = c(0,nrow(df_sub)), xlim = c(0,100), breaks = breaks)
   legend("topright", bty = "n", legend = paste0(prevalences[sp_name],"%"), col = "red")
-  #text(50,0.05,paste0(prevalences[sp_name],"%"), col = "red")
 }
 dev.off()
 
 ### the same without zeros
-
 #manual breaks
 bin_width <- 5
 breaks <- c(0, seq(bin_width, 100, by=bin_width))
-
 
 png(paste0("plots/estonia_new/training_data/",subfolder,"/positive_coverages.png"), width = im_width, height = im_height)
 par(mfrow = c(4,4),
@@ -58,7 +54,7 @@ for (sp_name in sp_list) {
 }
 dev.off()
 
-### pairplots for each species
+### plot each species coverages against each covariate
 X <- estonia_sub[,c(11:19)]
 # X$depth_to_secchi <- X$depth/X$zsd
 X$light_bottom <- exp(-1.7*X$depth/X$zsd)
@@ -78,87 +74,67 @@ for (i in 20:35) {
   dev.off()
 }
 
-### maps of coverages!!!
 
-# turn the training data into shapefile
-load("data/estonia_new/train_2020_2021.Rdata")
-df_sub <- df_sub[,!(colnames(df_sub) %in% c("Furcellaria lumbricalis loose form","Tolypella nidifica","Chara tomentosa"))]
-est.vect <- vect(df_sub, geom = c("x","y"), crs = "EPSG:3067")
+##### visualize predictive grid values by histograms
+load("data/estonia_new/predictive_grid_1km_all_variables_2021_july.Rdata")
+dim(pred_grid_1km_2021_july_df)
+colnames(pred_grid_1km_2021_july_df)
 
-# load in the coastline shapefile
-eur.coast <- vect("europe_coastline_shapefile/Europe_coastline_poly.shp")
-eur.coast <- project(eur.coast, "EPSG:3067")
-
-# cut for visualization
-ext_vec <- c(170000,550000,6410000,6640000)
-eur.coast <- crop(eur.coast,ext_vec)
-
-own_palette <- colorRampPalette(c("red","yellow","green"))
-
-for (sp_name in colnames(df_sub)[20:35]) {
-  n_cols <- 1+max(est.vect[,sp_name])
-  cols <- own_palette(n_cols)
-  
-  par(mfrow = c(1,1))
-  plot(eur.coast, main = sp_name)
-  plot(est.vect, col = cols[1+df_sub[,sp_name]], add = TRUE, cex = 1)
-}
-
-
-
-##### visualize predictive grid values
-dim(pred_grid_2021_july_df)
-colnames(pred_grid_2021_july_df)
+# predictive grid vs training data
 par(mfrow = c(3,3))
-
-vars <- colnames(pred_grid_2021_july_df)[2:10]
+vars <- colnames(pred_grid_1km_2021_july_df)[2:10]
 for (var_name in vars) {
-  hist(pred_grid_2021_july_df[,var_name], probability = TRUE, breaks = 50,
+  hist(pred_grid_1km_2021_july_df[,var_name], probability = TRUE, breaks = 50,
        xlab = "value", ylab = var_name, main = var_name, col = "forestgreen")
   hist(estonia_sub[,var_name], probability = TRUE, breaks = 50,
        xlab = "value", ylab = var_name, main = var_name, col = "royalblue", add = TRUE)
 }
 
+# just the training data
 for (var_name in vars) {
   hist(estonia_sub[,var_name], probability = TRUE, breaks = 50,
        xlab = "value", ylab = var_name, main = var_name)
 }
 
 
-
-##### visualize study area and observations on map
-### load in the training data
+### visualize study area and observations on map
+# load in the training data
+# either n = 2000
 load("data/estonia_new/train/train_2020_2021_n2000.Rdata")
 df_sub <- train_n2000
 
+# or n = 500 (used in modeling)
+load("data/estonia_new/train/train_2020_2021_n500.Rdata")
+df_sub <- train_n500
+
+# load in the spatial grid
 spatial_grid <- vect("data/estonia_new/spatial_random_effect_grid_20km/spatial_random_effect_grid_20km.shp")
 
 estonia_sub.vect <- vect(df_sub, geom = c("x","y"), crs = "EPSG:3067")
 train.vect.lonlat <- project(estonia_sub.vect, "EPSG:4326")
 #ext(estonia_sub.vect) <- ext(spatial_grid)
 
-### visualize the data spatially
+### load in the coastline as polygon
 europe.vect <- vect("europe_coastline_shapefile/Europe_coastline_poly.shp")
 europe.vect.lonlat <- project(europe.vect, "EPSG:4326")
 europe.vect <- project(europe.vect, "EPSG:3067") #reproject to TM35FIN
 
-
-### spatial random effect grid
-
+### visualize spatial random effect grid
+subfolder <- paste0("n_",nrow(df_sub))
 png(paste0("plots/estonia_new/training_data/",subfolder,"/spatial_effect_grid.png"), width = im_width, height = im_height)
 par(mfrow = c(1,1))
 plot(spatial_grid, xlab = "Easting (m)", ylab = "Northing (m)")
 plot(europe.vect, col = "lightgrey", add = TRUE)
 plot(estonia_sub.vect, add = TRUE, col = "red", cex = 0.7, alpha = 0.8)
 
-### add scale bars
+### add scale bar and north arrow
 sbar(xy = "bottomright", type = "bar", divs = 10, scaleby = 1000, below = "km")
 north(xy = c(600000,6370000),type = 2)
 
 dev.off()
 
-### same but without the grid itself
-
+### same but without the grid on the background (just observations)
+subfolder <- paste0("n_",nrow(df_sub))
 png(paste0("plots/estonia_new/training_data/",subfolder,"/study_area_close.png"), width = im_width, height = im_height)
 par(mfrow = c(1,1))
 #plot(spatial_grid, xlab = "Easting (m)", ylab = "Northing (m)", border = NA, background = "lightblue1")
@@ -172,24 +148,27 @@ sbar(d = 100000, xy = "bottomright", type = "bar", divs = 4, scaleby = 1000, bel
 north(xy = c(600000,6370000),type = 2)
 dev.off()
 
-# crop for some region of interest in longitudes and latitudes for plotting the broader image
+### create a large scale map to see better where the study are is located
+# crop for some region of interest in longitudes and latitudes
 #ext_vec_lonlat <- c(-25,60,45,80)
 ext_vec_lonlat <- c(-25,60,47,73)
 #ext_vec_lonlat <- c(-25,55,50,75)
 
+# cut the coastline shapefile
 europe.vect.lonlat.cut <- crop(europe.vect.lonlat, ext_vec_lonlat)
 
-
+# plot
+subfolder <- paste0("n_",nrow(df_sub))
 png(paste0("plots/estonia_new/training_data/",subfolder,"/study_area.png"), width = im_width, height = im_height)
 par(mfrow = c(1,1))
 plot(europe.vect.lonlat.cut, col = "lightgrey", xlab = "longitude (degrees)", ylab = "latitude (degrees)")
 plot(train.vect.lonlat, cex = 0.4, alpha = 0.8, col = "red", add = TRUE)
 
-#sbar(xy = "bottomright", type = "bar", divs = 10, scaleby = 1000, below = "km")
+# add the scale bar and north arrow
 sbar(d = 1000, xy = "bottomright", type = "bar", divs = 4, below = "km", lonlat = TRUE, lwd = 1, adj = c(1,-1.5))
 north(xy = c(-23,71),type = 2)
 
-### draw extent of spatial grid
+### draw extent of spatial grid (extent of the study area)
 spatial_grid.lonlat <- project(spatial_grid, "EPSG:4326")
 plot(as.polygons(ext(spatial_grid.lonlat)), add = TRUE, border = "blue", lwd = 2)
 dev.off()
