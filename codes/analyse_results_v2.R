@@ -1,3 +1,8 @@
+###########################################################################
+### SCRIPT TO ANALYSE RESULTS FROM FITTED BETA-REGRESSION MODELS        ###
+### INCLUDES CALCULATING LOO-CV, PLOTTING MAPS, DRAWING RESPONSE CURVES ###
+###########################################################################
+
 ### models fitted with M1-M4.R scripts
 ### this script loads fitted models and draws different maps and curves, as well as produces tables
 library(terra)
@@ -15,7 +20,6 @@ df_sub <- train_n500
 
 #load("data/estonia_new/train/train_2020_2021_n2000.Rdata")
 #df_sub <- train_n2000
-
 
 colnames(df_sub)
 colSums(df_sub[,20:38] > 0)
@@ -577,7 +581,6 @@ plot_random_effects <- function(pred_list, locs, pred.grid.vect, type, title_chr
   
   plot(r, colNA = "lightgrey", main = title_chr, ,plg = list(title = paste0("spatial RE")),
        xlab = "Easting (m)", ylab = "Northing (m)")
-  
 }
 
 

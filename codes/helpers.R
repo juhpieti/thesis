@@ -1,4 +1,7 @@
-### utility functions to be downloaded in different scripts
+####################################################################################
+### THIS SCRIPT INCLUDES A LOTS OF FUNCTIONS THAT ARE UTILIZED IN OTHERS SCRIPTS ###
+### FUNCTIONS ARE LOADED WITH load(path/helpers.R) IN OTHER SCRIPTS              ###
+####################################################################################
 
 # load in libraries
 library(rdist) #for calculating distance matrices
@@ -24,12 +27,16 @@ scale_covariates <- function(X,X_new = NULL) {
   # X: matrix for covariates at sampling locations
   # X_new: matrix for covariates at new locations
   # RETURNS: scaled X if X_new not given (=NULL), scaled X_new otherwise
+  
+  # calculate column mean and standard deviaton
   means <- apply(X,2,mean)
   sds <- apply(X,2,sd)
   
   if (!is.null(X_new)) { # if X_new is given, return that instead of X
     X <- X_new
   }
+  
+  # scale to 0 mean 1 variance
   for(i in 1:ncol(X)) {
     X[,i] <- (X[,i] - means[i]) / sds[i]
   }
@@ -58,370 +65,224 @@ add_interactions <- function(X,name1,name2) {
   return(X)
 }
 
-fit_logistic_regression <- function(y,X,n_chains=4,n_iter=500,add_iid_noise=FALSE) {
-  # y: 0/1 occurrences
-  # X: data matrix nxp
-  # n_chains: number of chains for MCMC to run
-  # n_iter: number of iterations for MCMC
-  # add_iid_noise: boolean telling whether to add random noise on top of f = alpha + XB 
-  # RETURNS stan model fit
-  data_list <- list(N=nrow(X),n_var=ncol(X),y=y,X=X)
-  file <- "stan_files/logistic_regression.stan"
-  if(add_iid_noise) {
-    file <- "stan_files/logistic_regression_iid_noise.stan"
-  }
-  mod <- stan(file,data=data_list,chains=n_chains,iter=n_iter,seed=42)
-}
-
-fit_binomial_regression <- function(y,X,n_chains=4,n_iter=500,add_iid_noise=FALSE) {
-  # y: 0/1 occurrences
-  # X: data matrix nxp
-  # n_chains: number of chains for MCMC to run
-  # n_iter: number of iterations for MCMC
-  # add_iid_noise: boolean telling whether to add random noise on top of f = alpha + XB 
-  # RETURNS stan model fit
-  data_list <- list(N=nrow(X),n_var=ncol(X),y=y,X=X)
-  file <- "stan_files/binomial_regression.stan"
-  if(add_iid_noise) {
-    file <- "stan_files/binomial_regression_iid_noise.stan"
-  }
-  mod <- stan(file,data=data_list,chains=n_chains,iter=n_iter,seed=42)
-}
-
-check_convergence <- function(stan_fit,is_iid_noise=FALSE) {
-  param_list <- c("alpha","beta")
-  if(is_iid_noise) {
-    param_list <- c(param_list,"s2")
-  }
-  print(summary(stan_fit, pars = param_list)$summary)
-  stan_trace(stan_fit, pars = param_list)
-}
-
 calc_loo <- function(stan_fit) {
+  ### calculates leave-one-out log-score 
+  ### requires that the stan_fit object includes output called log_lik (log-likelihoods are calculated in generate_quantities block)
+  # stan_fit: stan fit object
+  
   fit.loo <- loo(stan_fit)
-  return(fit.loo$estimates[1,1])
+  return(fit.loo$estimates[1,1]) # returns the sum of pointwise log-scores
 }
 
 inv_logit <- function(lin.pred) {
+  ### inverse logit function 1/1+exp(-x)
+  # lin.pred: linear predictor (x)
   return(1/(1+exp(-lin.pred)))
 }
 
-plot_distributions <- function(stan_fit,X,is_iid_noise=FALSE,plot_nx=3,plot_ny=3) {
-  alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
-  beta_sam <- as.matrix(stan_fit, pars = c("beta"))
-  
-  par(mfrow = c(plot_nx,plot_ny))
-  hist(alpha_sam, main = "alpha", xlab = "value", col = "forestgreen", breaks = 20)
-  abline(v=0, col = "red", lty = 2, lwd = 2)
-  
-  if (is_iid_noise) {
-    s2_sam <- as.matrix(stan_fit, pars = c("s2"))
-    hist(s2_sam, main = "s2", xlab = "value", col = "forestgreen", breaks = 20)
-  }
-  
-  for (i in 1:ncol(X)) {
-    hist(beta_sam[,i], main = colnames(X)[i], xlab = "value", col = "forestgreen", breaks = 20)
-    abline(v=0,col="red",lty=2,lwd=2)
-  }
-}
 
-# plot_responses <- function(stan_fit, X.train, X.orig, is_standardized = TRUE, second_order = FALSE, xmin=-3, xmax=3, ymin=0, ymax=1, plot_nx=3, plot_ny=3) {
-#   ###
-#   # xmin: min depth
-#   # xmax: max depth
-#   
-#   alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
-#   beta_sam <- as.matrix(stan_fit, pars = c("beta_1","beta_2"))
-#   
-#   ### response curves
-#   par(mfrow = c(plot_nx,plot_ny))
-#   
-#   ### remove the second order terms since they will be recreated for prediction values
-#   if (second_order) {
-#     X.train <- X.train[,-grep("\\^2", colnames(X.train))]
-#   }
-#   
-#   ### prepare a grid matrix
-#   depth_idx <- which(colnames(X.train) == "depth")
-#   x_grid <- c()
-#   for (i in 1:ncol(X.train)) {
-#     #x_grid <- cbind(x_grid, seq(0,100,length=500))
-#     x_grid <- cbind(x_grid, seq(min(X.orig[,i]),max(X.orig[,i]),length=500))
-#   }
-#   #x_grid[,depth_idx] <- seq(xmin,xmax,length=500)
-#   x_grid_orig <- x_grid
-#   
-#   ### scale if the X.train also standardized
-#   if (is_standardized) {
-#     x_grid <- scale_covariates(X.orig,x_grid)
-#   }
-#   
-#   colnames(x_grid) <- colnames(X.train)
-#   x_grid <- as.data.frame(x_grid)
-#   
-#   ### add second order if they are in the model
-#   if (second_order) {
-#     x_grid <- add_second_order_terms(x_grid, colnames(x_grid))
-#   }
-#   
-#   for (i in 1:ncol(X.train)) {
-#     var_name <- colnames(X.train)[i]
-#     f <- mean(alpha_sam) + x_grid[,i] * mean(beta_sam[,i])
-#     if (second_order) {
-#       f <- f + x_grid[,i+ncol(X.train)] * mean(beta_sam[,i+ncol(X.train)])
-#     }
-#     
-#     plot(x_grid_orig[,i],inv_logit(f),type="l",
-#          ylab="prob. of occ.",xlab="standardized value",
-#          main=colnames(X.train)[i],ylim = c(ymin,ymax))
-#   }
-# }
+### CALCULATING EXPECTATIONS FOR Y WHEN Y ~ LC-BETA(MU,RHO)
 
-# plot_responses_hanko <- function(stan_fit, X.train, X.orig, is_standardized = TRUE, is_iid_noise = FALSE, ymin=0, ymax=1, plot_nx=3, plot_ny=3) {
-#   
-#   alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
-#   beta_sam <- as.matrix(stan_fit, pars = c("beta"))
-#   
-#   ### response curves
-#   par(mfrow = c(plot_nx,plot_ny))
-#   
-#   ### prepare a grid matrix
-#   x_grid <- c()
-#   for (i in 1:ncol(X.train)) {
-#     x_grid <- cbind(x_grid, seq(min(X.orig[,i]),max(X.orig[,i]),length=500))
-#   }
-#   x_grid_orig <- x_grid
-#   
-#   ### scale if the X.train also standardized
-#   if (is_standardized) {
-#     x_grid <- scale_covariates(X.orig,x_grid)
-#   }
-#   
-#   for (i in 1:ncol(X.train)) {
-#     var_name <- colnames(X.train)[i]
-#     f <- mean(alpha_sam) + x_grid[,i] * mean(beta_sam[,i])
-#     
-#     plot(x_grid_orig[,i],inv_logit(f),type="l",
-#          ylab="prob. of occ.",xlab="standardized value",
-#          main=colnames(X.train)[i],ylim = c(ymin,ymax))
-#   }
-# }
-# 
-# plot_responses_categorical <- function(stan_fit, X.train, X.orig=NULL, is_standardized = FALSE, is_iid_noise = FALSE, xmin=0, xmax=60, ymin=0, ymax=1, plot_nx=3, plot_ny = 3) {
-#   ### plots the response curves
-#   # stan_fit: stanfit object
-#   # X.train: matrix X used to fit the model
-#   # X.orig: original data matrix (in case X.train is a scaled version)
-#   # is_standardized: boolean telling whether the X.train is standardized (1) or not (0)
-#   # is_iid_noise: boolean telling whether random noise was added on top of f = a + Xb
-#   alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
-#   beta_sam <- as.matrix(stan_fit, pars = c("beta"))
-# 
-#   par(mfrow = c(plot_nx,plot_ny))
-#   for(i in which(colnames(X.train) != "depth")) {
-#     depth_idx <- which(colnames(X.train) == "depth")
-#     depth_grid <- seq(xmin,xmax,.1)
-#     depth_grid_orig <- depth_grid
-#     
-#     # if standardized regression, depth has to be turn into standardized version
-#     if (is_standardized) {
-#       depth_grid <- scale_covariates(as.matrix(X.orig[,depth_idx]),matrix(depth_grid,ncol=1))
-#     }
-#     
-#     var_name <- colnames(X.train)[i]
-#     f <- mean(alpha_sam) + mean(beta_sam[,i]) + depth_grid * mean(beta_sam[,depth_idx])
-#     
-#     plot(depth_grid_orig,inv_logit(f),type="l",
-#          ylab = "prob. of occ.", xlab = "depth",
-#          main = colnames(X.train)[i], ylim = c(ymin,ymax))
-#   }
-#   
-# }
-
-plot_responses_highord <- function(stan_fit, X, is_iid_noise=FALSE, xmin = -3, xmax = 3, ymin = 0, ymax = 0.5, plot_nx=3, plot_ny=3) {
-  ### plot the coefficient distributions
-  alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
-  beta_sam <- as.matrix(stan_fit, pars = c("beta"))
+integrate_LC_beta <- function(mu,rho,a,b=0.5,right_censored=FALSE) {
+  ### calculates the expectation of y when y~LC-Beta(mu,rho)
+  ### formulas from Pietilä thesis 2025
+  # mu: mean of latent beta
+  # rho: precision/sample size of latent beta
+  # a: left-censoring constant
+  # b: right-censoring constant
+  # right_censored: Boolean to tell whether right-censoring is used
   
-  par(mfrow = c(plot_nx,plot_ny))
-  hist(alpha_sam, main = "alpha", xlab = "value", col = "forestgreen", breaks = 20)
-  abline(v=0, col = "red", lty = 2, lwd = 2)
-  for (i in 1:ncol(X)) {
-    hist(beta_sam[,i], main = colnames(X)[i], xlab = "value", col = "forestgreen", breaks = 20)
-    abline(v=0,col="red",lty=2,lwd=2)
-  }
-  
-  ### plot the response curves
-  par(mfrow = c(plot_nx,plot_ny))
-  n_first_ord_terms <- ncol(X) - sum(grepl("_\\^2", colnames(X))) #all columns except the ones that include "_^2" 
-  for(i in 1:n_first_ord_terms) {
-    x_grid <- seq(xmin,xmax,.1)
-    var_name <- colnames(X)[i]
-    idx_vec <- grep(var_name, colnames(X)) #take also higher order terms if included
-    f <- mean(alpha_sam) + x_grid * mean(beta_sam[,idx_vec[1]]) # add first order term
-    if (length(idx_vec) > 1) {
-      f <- f + (x_grid^2) * mean(beta_sam[,idx_vec[2]]) # add second order term
-    }
-    plot(x_grid,inv_logit(f),type="l",
-         ylab="prob. of occ.",xlab="standardized value",
-         main=colnames(X)[i],ylim = c(ymin,ymax))
-  }
-}
-
-plot_responses_binomial_regression <- function(stan_fit, X.train, X.orig, is_standardized = TRUE, second_order = FALSE, xmin=-3, xmax=3, ymin=0, ymax=1, plot_nx=3, plot_ny=3) {
-  ###
-  # xmin: min depth
-  # xmax: max depth
-  
-  alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
-  beta_sam <- as.matrix(stan_fit, pars = c("beta"))
-  
-  ### response curves
-  par(mfrow = c(plot_nx,plot_ny))
-  
-  ### remove the second order terms since they will be recreated for prediction values
-  if (second_order) {
-    X.train <- X.train[,-grep("\\^2", colnames(X.train))]
-  }
-  
-  ### prepare a grid matrix
-  depth_idx <- which(colnames(X.train) == "depth")
-  x_grid <- c()
-  for (i in 1:ncol(X.train)) {
-    x_grid <- cbind(x_grid, seq(0,100,length=500))
-  }
-  x_grid[,depth_idx] <- seq(xmin,xmax,length=500)
-  x_grid_orig <- x_grid
-  
-  ### scale if the X.train also standardized
-  if (is_standardized) {
-    x_grid <- scale_covariates(X.orig,x_grid)
-  }
-  
-  colnames(x_grid) <- colnames(X.train)
-  x_grid <- as.data.frame(x_grid)
-  
-  ### add second order if they are in the model
-  if (second_order) {
-    x_grid <- add_second_order_terms(x_grid, colnames(x_grid))
-  }
-  
-  for (i in 1:ncol(X.train)) {
-    var_name <- colnames(X.train)[i]
-    f <- mean(alpha_sam) + x_grid[,i] * mean(beta_sam[,i])
-    if (second_order) {
-      f <- f + x_grid[,i+ncol(X.train)] * mean(beta_sam[,i+ncol(X.train)])
-    }
-    
-    plot(x_grid_orig[,i],100*inv_logit(f),type="l",
-         ylab="prob. of occ.",xlab="standardized value",
-         main=colnames(X.train)[i],ylim = c(ymin,ymax))
-  }
-}
-
-
-####################################################################################################################################
-################################################ THE USEFUL ONES ###################################################################
-####################################################################################################################################
-
-integrate_LC_beta <- function(mu,rho,a) {
-  rho = max(rho,0.1) # integration crashes with very small rho
+  ### integral crashes in certain cases, try to fix that beforehand
+  ### this is probably not a good way to approach, think how to avoid this better?
+  rho = max(rho,0.1) # integration crashes with very small rho ("very" U-shaped distribution)
   if (mu >= 0.9975) { # integration crashes if lots of mass near 1
-    return(0.9975)
+    return(0.9975) # just return a high value
   }
-  if ((mu > 0.99) & (rho < 0.25)) { # again large mu with small rho fails integral (explodes in the right end)
-    return(0.995)
+  if ((mu > 0.99) & (rho < 0.25)) { # again large mu combained with small rho fails integral (explodes in the right end)
+    return(0.995) # again, return a high value
   }
-  calc_density <- function(x) (x*dbeta((x+a)/(a+1),mu*rho,(1-mu)*rho)/(a+1))
-  return(integrate(calc_density,0,1)$value)
+  
+  # safe_integrate <- function(f,lower,upper) {
+  #   tryCatch(integrate(f,lower,upper)$value,
+  #            error = function (e) {
+  #              message("Integration failed with mu=",mu,", rho=",rho, "| error: ", conditionMessage(e))
+  #       return(NA)
+  #     }
+  #   )
+  # }
+  
+  ### calculate the expectation
+  if (!right_censored) {
+    # calculate the integral by transforming the density of latent beta (again, see Pietilä Thesis 2025 for details)
+    calc_density <- function(x) (x*dbeta((x+a)/(a+1),mu*rho,(1-mu)*rho)/(a+1)) 
+    # integrate over (0,1) interval
+    return(integrate(calc_density,0,1)$value)
+    #return(safe_integrate(calc_density,0,1))
+  } else {
+    # if right-censoring is used, one needs to add 1xP(y=1), which is achieved when W > 1 <=> V > (1+a)/(1+a+b)
+    calc_density <- function(x) (x*dbeta((x+a)/(a+b+1),mu*rho,(1-mu)*rho)/(a+b+1))
+    return(1-pbeta((a+1)/(a+b+1),mu*rho,(1-mu)*rho)+integrate(calc_density,0,1)$value)
+    #return(safe_integrate(calc_density,0,1))
+  }
 }
 
-integrate_ZI_LC_beta <- function(mu,pi,rho,a) {
+integrate_ZI_LC_beta <- function(mu,pi,rho,a,b=0.5,right_censored=FALSE) {
+  ### calculates the expectation of y when y~LC-Beta(mu,rho) with zero-inflation
+  ### formulas from Pietilä thesis 2025
+  # mu: mean of latent beta
+  # pi: probability of suitability
+  # rho: precision/sample size of latent beta
+  # a: left-censoring constant
+  # b: right-censoring constant
+  # right_censored: Boolean to tell whether right-censoring is used
+  
+  ### integral crashes in certain cases, try to fix that beforehand
+  ### this is probably not a good way to approach, think how to avoid this better?
   rho = max(rho,0.1) # integration crashes with very small rho
   if (mu >= 0.995) { # integration crashes if lots of mass near 1
-    return(pi*0.995)
+    return(pi*0.995) # just return a high value
   }
   if  ((mu > 0.99) & (rho < 0.25)) { #integration crashes if mean is high and rho is small (explodes in the right end)
-    return(pi*0.995)
+    return(pi*0.995) # return a high value
   }
-  calc_density <- function(x) (x*pi*dbeta((x+a)/(a+1),mu*rho,(1-mu)*rho)/(a+1))
-  return(integrate(calc_density,0,1)$value)
-}
-
-calculate_probzero_LC_beta <- function(mu,rho,a) {
-  return(pbeta(a/(a+1),mu*rho,(1-mu)*rho))
-}
-
-calculate_probzero_ZI_LC_beta <- function(mu,pi,rho,a) {
-  return(1-pi + pi*pbeta(a/(a+1),mu*rho,(1-mu)*rho))
-}
-
-predict_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, a = 1, rho_modeled = FALSE, C = 1000) {
-  ### X.pred: prediction matrix (mxp)
-  ### X.orig: non-scaled data matrix (nxp) to learn about the scaling parameters
-  ### thinning: use every thinning:th posterior sample in predictions
-  ### a: left-censoring coefficient
-  ### rho_modeled: TRUE: rho modeled with covariates, FALSE: common rho
-  ### C: if rho modeled, what is it's upper limit? rho = C*inv_logit(a+XB)
-  ### RETURNS rep x m matrix of samples from posterior predictive for latent f
   
-  # posterior samples
+  ### calculate the expectation
+  if (!right_censored) {
+    # calculate the integral by transforming the density of latent beta (again, see Pietilä Thesis 2025 for details)
+    calc_density <- function(x) (x*pi*dbeta((x+a)/(a+1),mu*rho,(1-mu)*rho)/(a+1))
+    return(integrate(calc_density,0,1)$value)
+  } else {
+    # if right-censoring is used, one needs to add 1xP(y=1), which is achieved when W > 1 <=> V > (1+a)/(1+a+b)
+    calc_density <- function(x) (x*pi*dbeta((x+a)/(a+b+1),mu*rho,(1-mu)*rho)/(a+b+1))
+    return(pi*(1-pbeta((a+1)/(a+b+1),mu*rho,(1-mu)*rho)) + integrate(calc_density,0,1)$value)
+  }
+}
+
+calculate_probzero_LC_beta <- function(mu,rho,a,b=0.5,right_censored=FALSE) {
+  ### calculates the probability of zero when y~LC-Beta(mu,rho)
+  ### this is just P(y=0) = P(W<0) = P(V<a/(a+1)), check the details from Pietilä thesis (2025)
+  # mu: mean of latent beta
+  # rho: precision/sample size of latent beta
+  # a: left-censoring constant
+  # b: right-censoring constant
+  # right_censored: Boolean to tell whether right-censoring is used
+  
+  if (!right_censored) {
+    return(pbeta(a/(a+1),mu*rho,(1-mu)*rho)) 
+  } else {
+    return(pbeta(a/(a+b+1),mu*rho,(1-mu)*rho))
+  }
+}
+
+calculate_probzero_ZI_LC_beta <- function(mu,pi,rho,a,b=0.5,right_censored=FALSE) {
+  ### calculates the probability of zero when y~LC-Beta(mu,rho) with zero-inflation
+  ### this is just (1-pi) + pi*P(y=0) = 1-pi + pi*(V<a/(a+1)), check the details from Pietilä thesis (2025)
+  # mu: mean of latent beta
+  # rho: precision/sample size of latent beta
+  # a: left-censoring constant
+  # b: right-censoring constant
+  # right_censored: Boolean to tell whether right-censoring is used
+  if (!right_censored) {
+    return(1-pi + pi*pbeta(a/(a+1),mu*rho,(1-mu)*rho)) 
+  } else {
+    return(1-pi + pi*pbeta(a/(a+b+1),mu*rho,(1-mu)*rho))
+  }
+}
+
+### PREDICTING WITH LC-BETA MODELS
+
+predict_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, a = 1, rho_modeled = FALSE, C = 1000, b = 0.5, right_censored = FALSE, min_rho=0) {
+  ### function to make predictions with left-censored beta regression
+  # X.pred: prediction matrix (mxp)
+  # X.orig: non-scaled data matrix (nxp) to learn about the scaling parameters
+  # thinning: use every thinning:th posterior sample in predictions
+  # a: left-censoring constant
+  # rho_modeled: TRUE: rho modeled with covariates, FALSE: common rho
+  # C: if rho modeled, what is it's upper limit? rho = C*inv_logit(a+XB)
+  # b: right-censoring constant
+  # right_censored: Boolean to tell whether right-censoring is used
+  # min_rho: minimum possible value for rho(x) (if rho is modeled with covariates)
+  # RETURNS list of rep x m matrix of samples from posterior predictive for different quantities
+  ### 1) latent linear predictors f 
+  ### 2) predicted Ys
+  ### 3) expected Ys
+  ### 4) probabilies of zero
+  ### 5) rhos
+  
+  # load the posterior samples
   alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
   beta_sam <- as.matrix(stan_fit, pars = c("beta_1","beta_2"))
   
+  # prepare rho
   if (rho_modeled) {
+    # coefficient related to rho(x)
     alpha_rho_sam <- as.matrix(stan_fit, pars = c("alpha_rho"))
     beta_rho_sam <- as.matrix(stan_fit, pars = c("beta_rho_1","beta_rho_2"))
   } else {
+    # posterior sample of common rho
     rho_sam <- as.matrix(stan_fit, pars = c("rho"))
   }
   
-  # prepare prediction matrix
+  # prepare prediction matrix (scale, add second order terms)
   X.pred.scaled <- scale_covariates(X.orig,X.pred)
   Xpred <- add_second_order_terms(X.pred.scaled, colnames(X.pred))
-  Xpred <- as.matrix(Xpred)
+  Xpred <- as.matrix(Xpred) # df to matrix for matrix calculations
   
-  # initialize matrix for posterior predictive of f_sam
+  # initialize matrices for output
   f_sam <- c()
   y_sam <- c()
   EY_sam <- c()
   probzero_sam <- c()
   rho_sample <- c()
   
-  # loop over posterior samples
+  # loop over posterior samples (take every thinning:th sample)
   for (i in seq(1,nrow(beta_sam),thinning)) {
+    
+    # corresponding coefficients
     alpha_i <- alpha_sam[i,]
     beta_i <- beta_sam[i,]
     
+    # prepare rho
     if (rho_modeled){
-      rho_i <- C*inv_logit(as.vector(alpha_rho_sam[i,]  + Xpred %*% beta_rho_sam[i,]))
+      # rho(x) modeled with covariates
+      rho_i <- min_rho + (C-min_rho)*inv_logit(as.vector(alpha_rho_sam[i,]  + Xpred %*% beta_rho_sam[i,]))
     } else {
-      rho_i <- rep(rho_sam[i,], nrow(Xpred)) # every location has common rho
+      # every location has common rho
+      rho_i <- rep(rho_sam[i,], nrow(Xpred))
     }
     
+    # save the rhos for output
     rho_sample <- rbind(rho_sample,rho_i)
 
-    # latent f
+    # latent f (linear predictor a + xb)
     f_i <- as.vector(alpha_i + Xpred %*% beta_i)
     f_sam <- rbind(f_sam,f_i)
     
+    # mean for beta distribution using logit-link
     mu_i <- inv_logit(f_i)
     
-    # calculate expectations and probability of zeroes
-    
-    ### faster way to accomplish what was done within loop
-    #EYi <- sapply(mu_i,integrate_LC_beta,rho=rho_i,a=a)
+    ### calculate expectations and probability of zeroes
+    ### NOTE: mapply iterates over pairs of (mu,rho) with common a
     EYi <- mapply(integrate_LC_beta,mu=mu_i,rho=rho_i, MoreArgs = list(a=a))
-    #probzero_i <- sapply(mu_i,calculate_probzero_LC_beta,rho=rho_i,a=a)
     probzero_i <- mapply(calculate_probzero_LC_beta, mu=mu_i, rho=rho_i, MoreArgs = list(a=a))
 
-    #save
+    # save the expectations and prob. of zeros
     EY_sam <- rbind(EY_sam,EYi)
     probzero_sam <- rbind(probzero_sam, probzero_i)
     
-    #take also predictions from y_tilde
+    ### also predict Ys
+    # sample latent Vs
     V_i <- rbeta(nrow(Xpred),mu_i*rho_i,(1-mu_i)*rho_i)
-    y_i <- sapply(V_i, function(v) (max(0,(a+1)*v - a)))
+    
+    # scale & censor
+    if (!right_censored) {
+      # scale to (-a,1), everything < 0 are treated as 0
+      y_i <- sapply(V_i, function(v) (max(0,(a+1)*v - a)))
+    } else {
+      # if right-censoring is used, scale to (-a,1+b), everything < 0 are treated as 0, everything > 1 are treated as 1
+      y_i <- sapply(V_i, function(v) (max(0, min(1,(a+b+1)*v - a))))
+    }
+    # save the sample
     y_sam <- rbind(y_sam, y_i)
   }
   
@@ -431,37 +292,50 @@ predict_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, a =
               EY_sam = EY_sam,
               probzero_sam = probzero_sam,
               rho_sample = rho_sample))
-              #rho_sam = rho_sam[seq(1,nrow(beta_sam),thinning), ]))
 }
 
-predict_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, a = 1, rho_modeled = FALSE, C = 1000) {
-  ### X.pred: prediction matrix (mxp)
-  ### X.orig: non-scaled data matrix (nxp) to learn about the scaling parameters
-  ### thinning: use every thinning:th posterior sample in predictions
-  ### a: left-censoring coefficient
-  ### rho_modeled: TRUE: rho modeled with covariates, FALSE: common rho
-  ### C: if rho modeled, what is it's upper limit? rho = C*inv_logit(a+XB)
-  ### RETURNS rep x m matrix of samples from posterior predictive for latent f
+predict_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, a = 1, rho_modeled = FALSE, C = 1000, b = 0.5, right_censored = FALSE, min_rho = 0) {
+  ### function to make predictions with zero-inflated left-censored beta regression
+  # X.pred: prediction matrix (mxp)
+  # X.orig: non-scaled data matrix (nxp) to learn about the scaling parameters
+  # thinning: use every thinning:th posterior sample in predictions
+  # a: left-censoring constant
+  # rho_modeled: TRUE: rho modeled with covariates, FALSE: common rho
+  # C: if rho modeled, what is it's upper limit? rho = C*inv_logit(a+XB)
+  # b: right-censoring constant
+  # right_censored: Boolean to tell whether right-censoring is used
+  # min_rho: minimum possible value for rho(x) (if rho is modeled with covariates)
+  # RETURNS list of rep x m matrix of samples from posterior predictive for different quantities
+  ### 1) latent linear predictors f 
+  ### 2) predicted Ys
+  ### 3) expected Ys
+  ### 4) probabilies of zero
+  ### 5) probability of suitability 
+  ### 6) expectations given suitability
+  ### 7) rhos
   
-  # posterior samples
+  # load the posterior samples
   alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
   alpha_pi_sam <- as.matrix(stan_fit, pars = c("alpha_pi"))
   beta_sam <- as.matrix(stan_fit, pars = c("beta_1","beta_2"))
   beta_pi_sam <- as.matrix(stan_fit, pars = c("beta_pi_1","beta_pi_2"))
   
+  # prepare rho
   if (rho_modeled) {
+    # rho(x) modeled with covariates
     alpha_rho_sam <- as.matrix(stan_fit, pars = c("alpha_rho"))
     beta_rho_sam <- as.matrix(stan_fit, pars = c("beta_rho_1","beta_rho_2"))
   } else {
+    # every location has common rho
     rho_sam <- as.matrix(stan_fit, pars = c("rho"))
   }
 
-  # prepare prediction matrix
+  # prepare prediction matrix (scale, add second order terms)
   X.pred.scaled <- scale_covariates(X.orig,X.pred)
   Xpred <- add_second_order_terms(X.pred.scaled, colnames(X.pred))
-  Xpred <- as.matrix(Xpred)
+  Xpred <- as.matrix(Xpred) # from df to matrix for matrix calculation
   
-  # initialize matrix for posterior predictive of f_sam
+  # initialize matrices for output
   f_sam <- c()
   y_sam <- c()
   EY_sam <- c()
@@ -470,49 +344,65 @@ predict_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, 
   EY_if_suitable_sam <- c()
   rho_sample <- c()
   
-  # loop over posterior samples
+  # loop over posterior samples (take every thinning:th sample)
   for (i in seq(1,nrow(beta_sam),thinning)) {
+    # corresponding coefficients
     alpha_i <- alpha_sam[i,]
     alpha_pi_i <- alpha_pi_sam[i,]
     beta_i <- beta_sam[i,]
     beta_pi_i <- beta_pi_sam[i,]
     
+    # calculate rho
     if (rho_modeled){
-      rho_i <- C*inv_logit(as.vector(alpha_rho_sam[i,]  + Xpred %*% beta_rho_sam[i,]))
+      rho_i <- min_rho + (C-min_rho)*inv_logit(as.vector(alpha_rho_sam[i,]  + Xpred %*% beta_rho_sam[i,]))
     } else {
       rho_i <- rep(rho_sam[i,], nrow(Xpred)) # every location has common rho
     }
     
+    # save rho for output
     rho_sample <- rbind(rho_sample, rho_i)
 
-    # latent f for mean of beta
+    # latent f (linear predictor) for mean of beta
     f_i <- as.vector(alpha_i + Xpred %*% beta_i)
     f_sam <- rbind(f_sam,f_i)
     
+    # calculate the mean of beta using logit-link
     mu_i <- inv_logit(f_i)
     
-    # latent f for probability of suitability
+    # latent f (linear predictor) for probability of suitability
     f_pi_i <- as.vector(alpha_pi_i + Xpred %*% beta_pi_i)
     
+    # calculate probability of suitaility using logit-link
     pi_i <- inv_logit(f_pi_i)
     prob_suit_sam <- rbind(prob_suit_sam,pi_i)
     
-    
-    # calculate expectations and probability of zeroes
+    ### calculate expectations and probability of zeroes
+    ### NOTE: mapply iterates over pairs of (mu,pi,rho) with common a
     EYi <- mapply(integrate_ZI_LC_beta,mu=mu_i,pi=pi_i,rho=rho_i, MoreArgs = list(a=a))
-    EYi_if_suitable <- mapply(integrate_LC_beta,mu=mu_i,rho=rho_i, MoreArgs = list(a=a))
+    EYi_if_suitable <- mapply(integrate_LC_beta,mu=mu_i,rho=rho_i, MoreArgs = list(a=a)) #NOTE: this does not care about prob. of suitability
     probzero_i <- mapply(calculate_probzero_ZI_LC_beta,mu=mu_i,pi=pi_i,rho=rho_i, MoreArgs = list(a=a))
     
-    #save
+    # save for output
     EY_sam <- rbind(EY_sam,EYi)
     EY_if_suitable_sam <- rbind(EY_if_suitable_sam, EYi_if_suitable)
     probzero_sam <- rbind(probzero_sam, probzero_i)
     
-    #take also predictions from y_tilde
+    ### also predict Ys
+    # sample location suitabilities
     Z_i <- rbinom(nrow(Xpred),1,pi_i) #0/1 vector to tell whether the location is suitable (1 => Y from beta) or unsuitable (0 => Y=0)
+    # sample latent beta variables
     V_i <- rbeta(nrow(Xpred),mu_i*rho_i,(1-mu_i)*rho_i)
-    y_i <- sapply(V_i, function(v) (max(0,(a+1)*v - a)))
-    y_i <- Z_i*y_i #if the location was unsuitable, set to 0
+    
+    # scale & censor
+    if (!right_censored) {
+      # scale to (-a,1), everything < 0 are treated as 0
+      y_i <- sapply(V_i, function(v) (max(0,(a+1)*v - a)))
+    } else {
+      # if right-censoring is used, scale to (-a,1+b), everything < 0 are treated as 0, everything > 1 are treated as 1
+      y_i <- sapply(V_i, function(v) (max(0,min(1,(a+b+1)*v - a))))
+    }
+    # if the location was unsuitable, automatically y=0
+    y_i <- Z_i*y_i
     y_sam <- rbind(y_sam, y_i)
   }
   
@@ -523,59 +413,89 @@ predict_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, thinning = 10, 
               probzero_sam = probzero_sam,
               prob_suit_sam = prob_suit_sam,
               EY_if_suitable_sam = EY_if_suitable_sam,
-              rho_sample = rho_sample))#,
-              #rho_sam = rho_sam[seq(1,nrow(beta_sam),thinning), ]))
+              rho_sample = rho_sample))
 }
 
 prepare_P_matrix <- function(pred.locations, grid_center.locations) {
-  # prepare P matrix (m x S) that tells in which spatial block each prediction point belongs to
-  # each rows sums to 1, 1 indicating the block
+  ### prepares a sparse (n_locations X n_spatial_cells) matrix that indicates the spatial random effect block each point belongs to
+  ### each rows sums to 1, 1 indicating the random effect block
+  ### Given P matrix and vector z of n_spatial_cells spatial grid cells, Pz gives a vector of spatial random effects for each prediction location!
+  # pred.locations: includes prediction locations as Nx2-matrix (coordinates in TM35FIN system)
+  # grid_center.locations: includes the spatial grid centers as matrix (coordinates in TM35FIN system)
+  ### RETURNS matrix P
+  
+  # turn the matrixes into terra vectors
+  # this requires library(terra)
   grid_center.vect <- vect(grid_center.locations, geom = c("x","y"), crs = "EPSG:3067")
   pred_locs.vect <- vect(pred.locations, geom = c("x","y"), crs = "EPSG:3067")
-  nearest_grid_cells.df <- as.data.frame(nearest(pred_locs.vect, grid_center.vect))
-  nearest_id <- nearest_grid_cells.df$to_id #vector telling the ID of the closest grid cell
   
+  # find nearest spatial grid cell for each prediction location
+  nearest_grid_cells.df <- as.data.frame(nearest(pred_locs.vect, grid_center.vect))
+  # vector telling the ID of the closest grid cell
+  nearest_id <- nearest_grid_cells.df$to_id 
+  
+  # initialize P as zeros
   P <- matrix(0, nrow = nrow(pred.locations), ncol = nrow(grid_center.locations))
+  # loop over prediction locations, add 1 to the column corresponding to the closest spatial grid cell
   for (i in 1:nrow(pred.locations)) {
     P[i,nearest_id[i]] <- 1
   }
+  
+  # name rows and columns & return
   colnames(P) <- 1:nrow(grid_center.locations)
   rownames(P) <- 1:nrow(pred.locations)
   return(P)
 }
 
+
 predict_spatial_beta_regression <- function(stan_fit, X.pred, X.orig, pred.locations, S.pred, S.obs, thinning = 10, a = 1, rho_modeled = FALSE, C = 1000) {
-  ### X.pred: prediction matrix (mxp)
-  ### X.orig: non-scaled data matrix (nxp) to learn about the scaling parameters
+  ### function to make predictions with spatial left-censored beta regression
+  # X.pred: prediction matrix (mxp)
+  # X.orig: non-scaled data matrix (nxp) to learn about the scaling parameters
   # pred.locations: locations for each prediction cell (in meters)
   # S.pred: locations of coarse spatial grid cells (in kilometers)
   # S.obs: locations of observed coarse spatial grid cells (in kilometers, WATCH THAT THIS IS THE SAME AS WHEN FITTING A MODEL)
-  ### RETURNS rep x m matrix of samples from posterior predictive for latent f
+  # thinning: use every thinning:th posterior sample in predictions
+  # a: left-censoring constant
+  # rho_modeled: TRUE: rho modeled with covariates, FALSE: common rho
+  # C: if rho modeled, what is it's upper limit? rho = C*inv_logit(a+XB)
+  # RETURNS list of rep x m matrix of samples from posterior predictive for different quantities
+  ### 1) latent linear predictors f 
+  ### 2) predicted Ys
+  ### 3) expected Ys
+  ### 4) probabilies of zero
+  ### 5) predicted spatial random effects
+  ### 6) rhos
   
-  # posterior samples
+  # load in posterior samples
   alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
   beta_sam <- as.matrix(stan_fit, pars = c("beta_1","beta_2"))
   
+  # prepare rho
   if (rho_modeled) {
+    # rho(x) modeled with covariates
     alpha_rho_sam <- as.matrix(stan_fit, pars = c("alpha_rho"))
     beta_rho_sam <- as.matrix(stan_fit, pars = c("beta_rho_1","beta_rho_2"))
   } else {
+    # every location has common rho
     rho_sam <- as.matrix(stan_fit, pars = c("rho"))
   }
   
+  # spatial random effects
   phi_sam <- as.matrix(stan_fit, pars = c("phi"))
+  # covariance function parameters
   l_sam <- as.matrix(stan_fit, pars = c("l"))
   s2_sam <- as.matrix(stan_fit, pars = c("s2_cf"))
   
-  # prepare prediction matrix
+  # prepare prediction matrix (scale, add second order terms)
   X.pred.scaled <- scale_covariates(X.orig,X.pred)
   Xpred <- add_second_order_terms(X.pred.scaled, colnames(X.pred))
-  Xpred <- as.matrix(Xpred)
+  Xpred <- as.matrix(Xpred) # from df to matrix for calculation
   
   # prepare P matrix (mxS) that tells in which spatial random effect cell each prediction point belongs to
   P <- prepare_P_matrix(pred.locations,S.pred*1000) # turn grid locations to meters
   
-  # initialize matrix for posterior predictive of f_sam
+  # initialize matrices for output
   f_sam <- c()
   phi_pred_sam <- c()
   y_sam <- c()
@@ -583,68 +503,71 @@ predict_spatial_beta_regression <- function(stan_fit, X.pred, X.orig, pred.locat
   probzero_sam <- c()
   rho_sample <- c()
   
-  # loop over posterior samples
+  # loop over posterior samples (take every thinning:th sample)
   for (i in seq(1,nrow(beta_sam),thinning)) {
+    # corresponding coefficients
     alpha_i <- alpha_sam[i,]
     beta_i <- beta_sam[i,]
     
+    # calculate rho
     if (rho_modeled){
       rho_i <- C*inv_logit(as.vector(alpha_rho_sam[i,]  + Xpred %*% beta_rho_sam[i,]))
     } else {
       rho_i <- rep(rho_sam[i,], nrow(Xpred)) # every location has common rho
     }
     
+    # save for output
     rho_sample <- rbind(rho_sample, rho_i)
 
-    # latent f
+    # latent f (linear predictor)
     f_i <- as.vector(alpha_i + Xpred %*% beta_i)
     
     # sample spatial random effect
-    phi_obs_i <- phi_sam[i,]
+    phi_obs_i <- phi_sam[i,] #these are spatial random effects that are sampled (included in the training data), correspond to locations S.obs
     l_i <- l_sam[i,]
     s2_i <- s2_sam[i,]
     
-    # covariance matrixes with set of parameters
+    # calculate covariance block-matrices
     K_pred_obs <- exp_covariance(S.pred,S.obs,s2_i,l_i)
     K_pred <- exp_covariance(S.pred,S.pred,s2_i,l_i)
     K_obs <- exp_covariance(S.obs,S.obs,s2_i,l_i)
     
     # mean and covariance for predicting phi in new locations given set of parameters and observed phi
+    # justification for formulas can be read from Pietilä thesis (2025)
     phi_pred_m <- K_pred_obs %*% solve(K_obs,phi_obs_i)
     phi_pred_Cov <- K_pred - K_pred_obs %*% solve(K_obs) %*% t(K_pred_obs)
     
-    ### SAMPLE PHI PRED!!!
-    ### add jitter for computational stability
+    ### sample spatial random effects over the prediction locations
+    # add jitter on diagonal for computational stability
     phi_pred_Cov <- phi_pred_Cov + 1e-08*diag(length(phi_pred_m))
     
-    ### sample f_pred by sampling phi and adding the linear term
+    # use Cholesky for sampling (if Sigma = LL^t and I ~ MVN(0,1), then u + LI ~ MVN(u,Sigma))
     L <- t(chol(phi_pred_Cov))
     phi_pred_i <- phi_pred_m + L %*% rnorm(length(phi_pred_m))
     
-    # save spatial effects
+    # save spatial random effects
     phi_pred_sam <- rbind(phi_pred_sam, as.vector(P %*% phi_pred_i))
     
-    ### add the spatial random effect
+    # add the spatial random effect to linear predictor
     f_i <- f_i + as.vector(P %*% phi_pred_i) # P matrix picks the correct random effects (from the grid cell that the prediction point belongs to)
     f_sam <- rbind(f_sam,f_i)
     
-    ### mean of the distribution
+    # mean of the beta distribution using logit-link
     mu_i <- inv_logit(f_i)
     
-    # calculate expectations and probability of zeroes
-    
-    ### faster way to accomplish what was done within loop
-    #EYi <- sapply(mu_i,integrate_LC_beta,rho=rho_i,a=a)
-    EYi <- mapply(integrate_LC_beta, mu=mu_i,rho=rho_i, MoreArgs = list(a=a))
+    ### calculate expectations and probability of zeroes
+    ### NOTE: mapply iterates over pairs of (mu,rho) with common a
+    EYi <- mapply(integrate_LC_beta,mu=mu_i,rho=rho_i, MoreArgs = list(a=a))
     probzero_i <- mapply(calculate_probzero_LC_beta, mu=mu_i, rho=rho_i, MoreArgs = list(a=a))
-    #probzero_i <- sapply(mu_i,calculate_probzero_LC_beta,rho=rho_i,a=a)
     
-    #save
+    # save the expectations and prob. of zeros
     EY_sam <- rbind(EY_sam,EYi)
     probzero_sam <- rbind(probzero_sam, probzero_i)
     
-    #take also predictions from y_tilde
+    ### also predict Ys
+    # latent beta variables
     V_i <- rbeta(nrow(Xpred),mu_i*rho_i,(1-mu_i)*rho_i)
+    # scale & censor
     y_i <- sapply(V_i, function(v) (max(0,(a+1)*v - a)))
     y_sam <- rbind(y_sam, y_i)
   }
@@ -659,48 +582,63 @@ predict_spatial_beta_regression <- function(stan_fit, X.pred, X.orig, pred.locat
 }
 
 predict_spatial_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, pred.locations, S.pred, S.obs, thinning = 10, a = 1, rho_modeled = FALSE, C = 1000) {
-  ### X.pred: prediction matrix (mxp)
-  ### X.orig: non-scaled data matrix (nxp) to learn about the scaling parameters
+  ### function to make predictions with zero-inflated spatial left-censored beta regression
+  # X.pred: prediction matrix (mxp)
+  # X.orig: non-scaled data matrix (nxp) to learn about the scaling parameters
   # pred.locations: locations for each prediction cell (in meters)
   # S.pred: locations of coarse spatial grid cells (in kilometers)
   # S.obs: locations of observed coarse spatial grid cells (in kilometers, WATCH THAT THIS IS THE SAME AS WHEN FITTING A MODEL)
-  ### RETURNS rep x m matrix of samples from posterior predictive for latent f
+  # thinning: use every thinning:th posterior sample in predictions
+  # a: left-censoring constant
+  # rho_modeled: TRUE: rho modeled with covariates, FALSE: common rho
+  # C: if rho modeled, what is it's upper limit? rho = C*inv_logit(a+XB)
+  # RETURNS list of rep x m matrix of samples from posterior predictive for different quantities
+  ### 1) latent linear predictors f 
+  ### 2) predicted Ys
+  ### 3) expected Ys
+  ### 4) probabilies of zero
+  ### 5) probability of suitability
+  ### 6) predicted spatial random effects (for mean of beta distribution)
+  ### 7) predicted spatial random effects (for probability of suitability)
+  ### 8) rhos
   
-  # posterior samples
-  # coefficients
+  # load in posterior samples
   alpha_sam <- as.matrix(stan_fit, pars = c("alpha"))
   alpha_pi_sam <- as.matrix(stan_fit, pars = c("alpha_pi"))
   beta_sam <- as.matrix(stan_fit, pars = c("beta_1","beta_2"))
   beta_pi_sam <- as.matrix(stan_fit, pars = c("beta_pi_1","beta_pi_2"))
   
-  # dispersion parameter for beta distribution
+  # prepare rho
   if (rho_modeled) {
+    # rho(x) modeled with covariates
     alpha_rho_sam <- as.matrix(stan_fit, pars = c("alpha_rho"))
     beta_rho_sam <- as.matrix(stan_fit, pars = c("beta_rho_1","beta_rho_2"))
   } else {
+    # every location has common rho
     rho_sam <- as.matrix(stan_fit, pars = c("rho"))
   }
   
-  # spatial random effects
+  # spatial random effects (mean of beta & prob. of suitability)
   phi_sam <- as.matrix(stan_fit, pars = c("phi_mu"))
   phi_pi_sam <- as.matrix(stan_fit, pars = c("phi_pi"))
   
-  # covariance function parameters
+  # covariance function parameters (for mean of beta)
   l_sam <- as.matrix(stan_fit, pars = c("l_mu"))
   s2_sam <- as.matrix(stan_fit, pars = c("s2_mu"))
   
+  # covariance function parameters (for prob. of suitability)
   l_pi_sam <- as.matrix(stan_fit, pars = c("l_pi"))
   s2_pi_sam <- as.matrix(stan_fit, pars = c("s2_pi"))
   
-  # prepare prediction matrix
+  # prepare prediction matrix (scale, add second order terms)
   X.pred.scaled <- scale_covariates(X.orig,X.pred)
   Xpred <- add_second_order_terms(X.pred.scaled, colnames(X.pred))
-  Xpred <- as.matrix(Xpred)
+  Xpred <- as.matrix(Xpred) # from df to matrix for calculation
   
-  # prepare P matrix (mxS) that tells in which spatial random effect cell each predition point belongs to
+  # prepare P matrix (mxS) that tells in which spatial random effect cell each prediction point belongs to
   P <- prepare_P_matrix(pred.locations,S.pred*1000) # turn grid locations to meters
   
-  # initialize matrix for posterior predictive of f_sam
+  # initialize matrices for output
   f_sam <- c()
   y_sam <- c()
   EY_sam <- c()
@@ -711,109 +649,115 @@ predict_spatial_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, pred.lo
   phi_pi_pred_sam <- c()
   rho_sample <- c()
   
-  # loop over posterior samples
+  # loop over posterior samples (take every thinning:th sample)
   for (i in seq(1,nrow(beta_sam),thinning)) {
+    # corresponding coefficients
     alpha_i <- alpha_sam[i,]
     alpha_pi_i <- alpha_pi_sam[i,]
     beta_i <- beta_sam[i,]
     beta_pi_i <- beta_pi_sam[i,]
     
+    # calculate rho
     if (rho_modeled){
       rho_i <- C*inv_logit(as.vector(alpha_rho_sam[i,]  + Xpred %*% beta_rho_sam[i,]))
     } else {
       rho_i <- rep(rho_sam[i,], nrow(Xpred)) # every location has common rho
     }
     
+    # save for output
     rho_sample <- rbind(rho_sample, rho_i)
     
-    ### 1) construct f for mean of the beta distribution
+    ### 1) PREDICT SPATIAL RANDOM EFFECTS FOR MEAN OF BETA DISTRIBUTION
+    # latent f (linear predictor)
     f_i <- as.vector(alpha_i + Xpred %*% beta_i)
     
-    # sample spatial random effects
-    phi_obs_i <- phi_sam[i,]
+    phi_obs_i <- phi_sam[i,] #these are spatial random effects that are sampled (included in the training data), correspond to locations S.obs
     l_i <- l_sam[i,]
     s2_i <- s2_sam[i,]
     
-    # covariance matrixes with set of parameters
+    # calculate covariance block-matrices
     K_pred_obs <- exp_covariance(S.pred,S.obs,s2_i,l_i)
     K_pred <- exp_covariance(S.pred,S.pred,s2_i,l_i)
     K_obs <- exp_covariance(S.obs,S.obs,s2_i,l_i)
     
     # mean and covariance for predicting phi in new locations given set of parameters and observed phi
+    # justification for formulas can be read from Pietilä thesis (2025)
     phi_pred_m <- K_pred_obs %*% solve(K_obs,phi_obs_i)
     phi_pred_Cov <- K_pred - K_pred_obs %*% solve(K_obs) %*% t(K_pred_obs)
     
-    ### SAMPLE PHI PRED!!!
     ### add jitter for computational stability
     phi_pred_Cov <- phi_pred_Cov + 1e-08*diag(length(phi_pred_m))
     
-    ### sample f_pred by sampling phi and adding the linear term
+    # use Cholesky for sampling (if Sigma = LL^t and I ~ MVN(0,1), then u + LI ~ MVN(u,Sigma))
     L <- t(chol(phi_pred_Cov))
     phi_pred_i <- phi_pred_m + L %*% rnorm(length(phi_pred_m))
     
     # save spatial effects
     phi_mu_pred_sam <- rbind(phi_mu_pred_sam, as.vector(P %*% phi_pred_i))
     
-    ### add the spatial random effect
+    # add the spatial random effect to linear predictor
     f_i <- f_i + as.vector(P %*% phi_pred_i) # P matrix picks the correct random effects (from the grid cell that the prediction point belongs to)
     f_sam <- rbind(f_sam,f_i)
     
-    ### mean of the distribution
+    # mean of the beta distribution using logit-link
     mu_i <- inv_logit(f_i)
     
-    ### 2) construct f for the probability of suitability
+    ### 2) PREDICT SPATIAL RANDOM EFFECTS FOR PROBABILITY OF ZERO
+    # latent f (linear predictor)
     f_pi_i <- as.vector(alpha_pi_i + Xpred %*% beta_pi_i)
     
     # sample spatial random effects
-    phi_obs_i <- phi_pi_sam[i,]
+    phi_obs_i <- phi_pi_sam[i,] #these are spatial random effects that are sampled (included in the training data), correspond to locations S.obs
     l_i <- l_pi_sam[i,]
     s2_i <- s2_pi_sam[i,]
     
-    # covariance matrixes with set of parameters
+    # calculate covariance block-matrices
     K_pred_obs <- exp_covariance(S.pred,S.obs,s2_i,l_i)
     K_pred <- exp_covariance(S.pred,S.pred,s2_i,l_i)
     K_obs <- exp_covariance(S.obs,S.obs,s2_i,l_i)
     
     # mean and covariance for predicting phi in new locations given set of parameters and observed phi
+    # justification for formulas can be read from Pietilä thesis (2025)
     phi_pred_m <- K_pred_obs %*% solve(K_obs,phi_obs_i)
     phi_pred_Cov <- K_pred - K_pred_obs %*% solve(K_obs) %*% t(K_pred_obs)
     
-    ### SAMPLE PHI PRED!!!
     ### add jitter for computational stability
     phi_pred_Cov <- phi_pred_Cov + 1e-08*diag(length(phi_pred_m))
     
-    ### sample f_pred by sampling phi and adding the linear term
+    # use Cholesky for sampling (if Sigma = LL^t and I ~ MVN(0,1), then u + LI ~ MVN(u,Sigma))
     L <- t(chol(phi_pred_Cov))
     phi_pi_pred_i <- phi_pred_m + L %*% rnorm(length(phi_pred_m))
     
     # save spatial effects
     phi_pi_pred_sam <- rbind(phi_pi_pred_sam, as.vector(P %*% phi_pi_pred_i))
     
-    ### add the spatial random effect
+    # add the spatial random effect to linear predictor
     f_pi_i <- f_pi_i + as.vector(P %*% phi_pi_pred_i) # P matrix picks the correct random effects (from the grid cell that the prediction point belongs to)
 
-    ### probability of suitability
+    ### probability of suitability using logit-link
     pi_i <- inv_logit(f_pi_i)
     prob_suit_sam <- rbind(prob_suit_sam, pi_i)
     
-    ### 3) calculate expectations and probability of zeroes
-    
-    ### faster way to accomplish what was done within loop
+    ### calculate expectations and probability of zeroes
+    ### NOTE: mapply iterates over pairs of (mu,pi,rho) with common a
     EYi <- mapply(integrate_ZI_LC_beta,mu=mu_i,pi=pi_i,rho=rho_i, MoreArgs = list(a=a))
-    #EYi_if_suitable <- sapply(mu_i,integrate_LC_beta,rho=rho_i,a=a)
-    EYi_if_suitable <- mapply(integrate_LC_beta,mu=mu_i,rho=rho_i, MoreArgs = list(a=a))
+    EYi_if_suitable <- mapply(integrate_LC_beta,mu=mu_i,rho=rho_i, MoreArgs = list(a=a)) #NOTE: this does not care about prob. of suitability
     probzero_i <- mapply(calculate_probzero_ZI_LC_beta,mu=mu_i,pi=pi_i,rho=rho_i, MoreArgs = list(a=a))
     
-    #save
+    # save for output
     EY_sam <- rbind(EY_sam,EYi)
     EY_if_suitable_sam <- rbind(EY_if_suitable_sam, EYi_if_suitable)
     probzero_sam <- rbind(probzero_sam, probzero_i)
-    
-    #take also predictions from y_tilde
+  
+    ### also predict Ys
+    # sample suitabilities of locations
     Z_i <- rbinom(nrow(Xpred),1,pi_i) #0/1 vector to tell whether the location is suitable (1 => Y from beta) or unsuitable (0 => Y=0)
+    # sample latent beta variables
     V_i <- rbeta(nrow(Xpred),mu_i*rho_i,(1-mu_i)*rho_i)
+    # scale & censor
     y_i <- sapply(V_i, function(v) (max(0,(a+1)*v - a)))
-    y_i <- Z_i*y_i #if the location was unsuitable, set to 0
+    # if the location was unsuitable, automatically y = 0
+    y_i <- Z_i*y_i 
     y_sam <- rbind(y_sam, y_i)
   }
   
@@ -829,7 +773,10 @@ predict_spatial_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, pred.lo
               rho_sample = rho_sample))
 }
   
+####### UNEXAMINED FROM THIS ONWARDS #################
 
+
+### IS THIS THE SAME THAN USED IN ANALYSE_RESULTS?
 plot_and_save_responses <- function(mod_list,X,grid_length = 200,im_width,im_height,thinning=200) {
   
   grid_matrix <- matrix(0,nrow = grid_length, ncol = ncol(X))

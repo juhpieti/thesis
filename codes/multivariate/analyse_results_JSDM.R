@@ -15,6 +15,9 @@ source("codes/helpers.R")
 load("data/estonia_new/train/train_2020_2021_n100.Rdata")
 train <- train_n100
 
+load("data/estonia_new/train/train_2020_2021_all_species_n100.Rdata")
+train <- train_n100_all_species
+
 # load("data/estonia_new/train/train_2020_2021_n500.Rdata")
 # train <- train_n500
 
@@ -204,7 +207,25 @@ plot_random_effects <- function(pred_list, locs, pred.grid.vect, type, title_chr
 }
 
 plot_random_effects_JSDM <- function(pred_list,locs,pred.grid.vect,type,title_chr="") {
+  ### type: "mu" or "pi"
   
+  # how many latent factors are there in the model?
+  n_factors <- dim(pred_list$Z_mu_sam)[3]
+  
+  for (k in 1:n_factors) {
+    if (type == "mu") {
+      vals <- colMeans(pred_list$Z_mu_sam[,,k])
+    } else {
+      vals <- colMeans(pred_list$Z_pi_sam[,,k])
+    }
+    
+    pred_df <- as.data.frame(cbind(locs,vals))
+    pred_vect <- vect(pred_df, geom = c("x","y"), crs = "EPSG:3067")
+    pred_rast <- rast(ext = ext(pred.grid.vect), res = 1000, crs = "EPSG:3067")
+    r <- rasterize(pred_vect, pred_rast, field = "vals")
+    
+    plot(r, colNA = "lightgrey", main = title_chr, plg = list(title = paste0("Z",k)), xlab = "Easting (m)", ylab = "Northing (m)")
+  }
 }
 
 
@@ -227,35 +248,89 @@ for(sp_name in sp_names) {
   stacked_SDM_predictions[[sp_name]] <- pred
 }
 
+
 # plot with JSDM function
-plot_map_JSDM(stacked_SDM_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,FALSE)
-plot_map_JSDM(stacked_SDM_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,TRUE)
+plot_map_JSDM(stacked_SDM_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,summary_maps = FALSE)
+plot_map_JSDM(stacked_SDM_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,summary_maps = TRUE)
 
 # plot also hotspots
-plot_map_JSDM(stacked_SDM_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",0.7,sp_names,FALSE)
-plot_map_JSDM(stacked_SDM_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",0.7,sp_names,TRUE)
+plot_map_JSDM(stacked_SDM_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",0.8,sp_names,summary_maps = FALSE)
+plot_map_JSDM(stacked_SDM_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",0.7,sp_names,summary_maps = TRUE)
 
 
 ### 2) JSDM
 
-# load model
+# load model (21 species)
+fit.JSDM.21species <- readRDS("models/multivariate/n_100/M1/JSDM_21species.RDS")
+fit.JSDM.21species.hier.prior <- readRDS("models/multivariate/n_100/M1/JSDM_21species_hierarchical_priors.RDS") 
+fit.JSDM.4species <- readRDS("models/multivariate/n_100/9_covariates/JSDM_test.RDS")
 
-# predict 
+# predict (J=4)
+sp_names <- c("Cladophora glomerata","Fucus vesiculosus","Mytilus trossulus","Stuckenia pectinata")
+set.seed(42)
+JSDM_predictions_4species <- predict_beta_regression_JSDM(fit.JSDM.4species,pred_grid_1km_2021_july_df[,colnames(X)],X,sp_names,2,100,1,FALSE,1000,0,FALSE,0)
+plot_map_JSDM(JSDM_predictions_4species,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,summary_maps = TRUE)
+
+
+
+# predict (J=21)
+sp_names <- colnames(train_n100_all_species[,20:71])
+sp_names <- sp_names[which(colSums(train_n100_all_species[,20:71] > 0) > 0)]
+
+set.seed(42)
+JSDM_predictions <- predict_beta_regression_JSDM(fit.JSDM.21species,pred_grid_1km_2021_july_df[,colnames(X)],X,sp_names,2,100,1,FALSE,1000,0,FALSE,0)
+set.seed(42)
+JSDM_predictions.hier.prior <- predict_beta_regression_JSDM(fit.JSDM.21species.hier.prior,pred_grid_1km_2021_july_df[,colnames(X)],X,sp_names,2,100,1,FALSE,1000,0,FALSE,0)
 
 # plot
-plot_map_JSDM(JSDM_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,FALSE)
-plot_map_JSDM(JSDM_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,TRUE)
+plot_map_JSDM(JSDM_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,summary_maps = FALSE)
+plot_map_JSDM(JSDM_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,summary_maps = TRUE)
+plot_map_JSDM(JSDM_predictions.hier.prior,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,summary_maps = TRUE)
+
 
 # plot also hotspots
-plot_map_JSDM(JSDM_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",0.7,sp_names,FALSE)
-plot_map_JSDM(JSDM_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",0.7,sp_names,TRUE)
+plot_map_JSDM(JSDM_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",0.8,sp_names,summary_maps = FALSE)
+plot_map_JSDM(JSDM_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",0.5,sp_names,summary_maps = TRUE)
 
 
 ##### 2) ZERO-INFLATED LEFT-CENSORED BETA REGRESSION
 plot_map_JSDM(JSDM.ZI_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,FALSE)
 
 ##### 3) SPATIAL LEFT-CENSORED BETA REGRESSION
-plot_map_JSDM(JSDM.spat_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,FALSE)
+# gather the predictions as lists
+stacked_SDM_spat_predictions <- list()
+for(sp_name in sp_names) {
+  sp_name_modified <- gsub(" ","_",sp_name)
+  sp_name_modified <- gsub("/","_",sp_name_modified)
+  mod <- readRDS(paste0("models/",subfolder,"/M3/",sp_name_modified,".rds"))
+  pred <- predict_spatial_beta_regression(mod,pred_grid_1km_2021_july_df[,colnames(X)],X,pred_grid_1km_2021_july_df[,c("x","y")],grid_centers.df/1000, observed_grid_cells.df,400,1,FALSE,1000)
+  stacked_SDM_spat_predictions[[sp_name]] <- pred
+}
+
+
+# plot with JSDM function
+plot_map_JSDM(stacked_SDM_spat_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,summary_maps = FALSE)
+plot_map_JSDM(stacked_SDM_spat_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,summary_maps = TRUE)
+
+# plot also hotspots
+plot_map_JSDM(stacked_SDM_spat_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",0.8,sp_names,summary_maps = FALSE)
+plot_map_JSDM(stacked_SDM_spat_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",0.5,sp_names,summary_maps = TRUE)
+
+# plot JSDMs
+plot_map_JSDM(JSDM.spat_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,summary_maps = FALSE)
+plot_map_JSDM(JSDM.spat_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,summary_maps = TRUE)
+
+# plot also hotspots
+plot_map_JSDM(JSDM.spat_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",0.8,sp_names,summary_maps = FALSE)
+plot_map_JSDM(JSDM.spat_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",0.5,sp_names,summary_maps = TRUE)
+
+
+# plot spatially correlated latent factors
+plot_random_effects_JSDM(JSDM.spat_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"mu","latent factors (mu)")
+
+### loop over 4 species, predict and see the random effects
+plot_random_effects(SDM_spat_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"mu","RE (mu)")
+
 
 ##### 4) ZERO-INFLATED LEFT-CENSORED BETA REGRESSION
 plot_map_JSDM(JSDM.spat_ZI_predictions,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,FALSE)
