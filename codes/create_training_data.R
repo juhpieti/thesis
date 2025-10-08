@@ -41,6 +41,12 @@ sp_list <- c("Amphibalanus improvisus","Chara aspera","Chara tomentosa",
              "Tolypella nidifica","Ulva intestinalis","Vertebrata fucoides",
              "Zannichellia palustris","Zostera marina")
 
+# take one with all species
+df_all_species <- df[,c(colnames(df)[1:8],"x","y",vars,colnames(df)[20:71])]
+
+save(df_all_species, file = "data/estonia_new/train/train_2020_2021_full_all_species.Rdata")
+
+# then one with "interesting" species
 df <- df[,c(colnames(df)[1:8],"x","y",vars,sp_list)]
 
 # save the full training data
@@ -71,3 +77,24 @@ n <- 100
 rand_idx <- sample(1:nrow(train_full),n)
 train_n100 <- train_full[rand_idx, ]
 save(train_n100, file = "data/estonia_new/train/train_2020_2021_n100.Rdata")
+
+### take also subsets using multiple species
+
+set.seed(123)
+n <- 100
+rand_idx <- sample(1:nrow(df_all_species),n)
+train_n100_all_species <- df_all_species[rand_idx, ]
+save(train_n100_all_species, file = "data/estonia_new/train/train_2020_2021_all_species_n100.Rdata")
+
+set.seed(123)
+n <- 250
+rand_idx <- sample(1:nrow(df_all_species),n)
+train_n250_all_species <- df_all_species[rand_idx, ]
+save(train_n250_all_species, file = "data/estonia_new/train/train_2020_2021_all_species_n250.Rdata")
+
+set.seed(123)
+n <- 500
+rand_idx <- sample(1:nrow(df_all_species),n)
+train_n500_all_species <- df_all_species[rand_idx, ]
+save(train_n500_all_species, file = "data/estonia_new/train/train_2020_2021_all_species_n500.Rdata")
+
