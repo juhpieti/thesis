@@ -38,7 +38,7 @@ data {
 
 transformed data {
   real eps = 1e-08; // small value for computational stability (avoid exact 0 and 1 in certain cases)
-  array[n_obs_grid] vector[2] s_array; //kernel function takes input as array of vectors
+  array[n_obs_grid] vector[2] s_array; // kernel function takes input as array of vectors
   for(i in 1:n_obs_grid) {
     s_array[i] = to_vector(s[i]);
   }
@@ -68,6 +68,7 @@ transformed parameters{
     matrix[n_obs_grid,n_obs_grid] L; // cholesky decomposition
     
     K = gp_exponential_cov(s_array,1,l[k]); // use s = 1 for variance of 1 as in non-spatial latent factor model
+    K = K + diag_matrix(rep_vector(eps,n_obs_grid)); // jitter for stability
     L = cholesky_decompose(K);
     
     phi[,k] = L*Z[,k]; //follows GP(0,K)

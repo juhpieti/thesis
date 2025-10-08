@@ -67,7 +67,7 @@ model {
   
   // factor loadings
   to_vector(Z) ~ normal(0,1);
-  to_vector(Lambda) ~ normal(0,1);
+  to_vector(Lambda) ~ normal(0,0.5);
   
   // likelihood terms
   for (i in 1:N) {

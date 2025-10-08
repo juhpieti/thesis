@@ -1,4 +1,29 @@
 //
+functions {
+  // function for log-likelihood for left-censored beta regression
+  real lc_beta_density(real y, real mu, real rho, real a, real eps, int N) {
+    real ll; //log-likelihood
+    real y_scaled; //scaled y
+    
+    // resctrict mu to open interval (0,1)
+    real mu_shifted;
+    mu_shifted = fmin(fmax(mu,eps), 1-eps);
+    
+    // go separately through cases y=0, y=1, y \in (0,1)
+    if (y==0) {
+      ll = log(fmax(1e-20, beta_cdf(a/(a+1) | mu_shifted*rho, (1-mu_shifted)*rho))); //avoid log(0)
+    } else if (y == 1) { // beta distribution cannot take y=1, shift using [y*(N-1)+0.5]/2 as proposed in the literature
+      y_scaled = ((y*(N-1)+0.5)/N + a)/(1+a);
+      // y_scaled = (y-eps+a)/(1+a); // this is how I scaled in thesis
+      ll = beta_lpdf(y_scaled | mu_shifted*rho, (1-mu_shifted)*rho) - log(a+1);
+    } else {
+      y_scaled = (y+a)/(a+1);
+      ll = beta_lpdf(y_scaled | mu_shifted*rho, (1-mu_shifted)*rho) - log(a+1);
+    }
+    return ll;
+  }
+}
+
 data {
   int<lower=0> N; // number of data points
   int<lower=0> n_var; // number of variables
@@ -27,31 +52,32 @@ transformed parameters{
 
 model {
   // priors for coefficients
-  beta_1 ~ normal(0,sqrt(2));
-  beta_2 ~ normal(0,sqrt(2));
+  beta_1 ~ normal(0,sqrt(1));
+  beta_2 ~ normal(0,sqrt(1));
 
   alpha ~ normal(0,sqrt(2)); // ORIGINAL
   rho ~ cauchy(0,sqrt(10));
   
   // likelihood terms
   for (i in 1:N) {
-    // calculate the mean parameter for beta distribution 
-    real mu_i;
-    mu_i = mu[i];
-    mu_i = fmin(fmax(mu_i,eps), 1 - eps); // restrict to open (0,1)
-    
-    if (y[i] == 0) {
-      //target += beta_lcdf(a/(a+1) | mu_i*rho, (1-mu_i)*rho);
-      target += log(fmax(1e-20, beta_cdf(a/(a+1) | mu_i*rho, (1-mu_i)*rho)));
-      
-    // since Beta-distribution has support on open interval (0,1), take y = 1 cases also separately, substract a small value
-    } else if (y[i] ==  1) {
-      (y[i]-eps+a)/(a+1) ~ beta(mu_i*rho, (1-mu_i)*rho);
-      
-    // y \in (0,1)  
-    } else {
-      (y[i]+a)/(a+1) ~ beta(mu_i*rho, (1-mu_i)*rho); // scale to [0,1] interval
-    }
+    target += lc_beta_density(y[i],mu[i],rho,a,eps,N);
+    // // calculate the mean parameter for beta distribution 
+    // real mu_i;
+    // mu_i = mu[i];
+    // mu_i = fmin(fmax(mu_i,eps), 1 - eps); // restrict to open (0,1)
+    // 
+    // if (y[i] == 0) {
+    //   //target += beta_lcdf(a/(a+1) | mu_i*rho, (1-mu_i)*rho);
+    //   target += log(fmax(1e-20, beta_cdf(a/(a+1) | mu_i*rho, (1-mu_i)*rho)));
+    //   
+    // // since Beta-distribution has support on open interval (0,1), take y = 1 cases also separately, substract a small value
+    // } else if (y[i] ==  1) {
+    //   (y[i]-eps+a)/(a+1) ~ beta(mu_i*rho, (1-mu_i)*rho);
+    //   
+    // // y \in (0,1)  
+    // } else {
+    //   (y[i]+a)/(a+1) ~ beta(mu_i*rho, (1-mu_i)*rho); // scale to [0,1] interval
+    // }
   }
 }
 
@@ -60,17 +86,18 @@ generated quantities {
   vector[N] log_lik;
 
   for (i in 1:N) {
-    real mu_i;
-    mu_i = mu[i];
-    mu_i = fmin(fmax(mu_i,eps), 1 - eps);
-    
-    if (y[i] == 0) {
-      // log_lik[i] = beta_lcdf(a/(a+1) | mu_i*rho, (1-mu_i)*rho);
-      log_lik[i] = log(fmax(1e-20, beta_cdf(a/(a+1) | mu_i*rho, (1-mu_i)*rho)));
-    } else if (y[i]==1) {
-      log_lik[i] = beta_lpdf((y[i]-eps+a)/(a+1) | mu_i*rho, (1-mu_i)*rho) - log(1+a);
-    } else {
-      log_lik[i] = beta_lpdf((y[i]+a)/(a+1) | mu_i*rho, (1-mu_i)*rho) - log(1+a); // scale to [0,1] interval
-    }
+    log_lik[i] = lc_beta_density(y[i],mu[i],rho,a,eps,N);
+    // real mu_i;
+    // mu_i = mu[i];
+    // mu_i = fmin(fmax(mu_i,eps), 1 - eps);
+    // 
+    // if (y[i] == 0) {
+    //   // log_lik[i] = beta_lcdf(a/(a+1) | mu_i*rho, (1-mu_i)*rho);
+    //   log_lik[i] = log(fmax(1e-20, beta_cdf(a/(a+1) | mu_i*rho, (1-mu_i)*rho)));
+    // } else if (y[i]==1) {
+    //   log_lik[i] = beta_lpdf((y[i]-eps+a)/(a+1) | mu_i*rho, (1-mu_i)*rho) - log(1+a);
+    // } else {
+    //   log_lik[i] = beta_lpdf((y[i]+a)/(a+1) | mu_i*rho, (1-mu_i)*rho) - log(1+a); // scale to [0,1] interval
+    // }
   }
 }
