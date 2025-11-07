@@ -44,9 +44,12 @@ parameters {
   
   // hierarchical priors for beta
   vector[n_var/2] mu_beta_1; // mean for first order terms
-  vector[n_var/2] mu_beta_2; // mean for second order terms
-  vector<lower=0>[n_var/2] s_beta_1; // standard deviance for first order terms
-  vector<lower=0>[n_var/2] s_beta_2; // standard deviance for second order terms
+  vector<upper=0>[n_var/2] mu_beta_2; // mean for second order terms
+  vector[n_var/2] mu_alpha; // mean for intercept
+  
+  vector<lower=0>[n_var/2] s_beta_1; // standard deviation for first order terms
+  vector<lower=0>[n_var/2] s_beta_2; // standard deviation for second order terms
+  vector<lower=0>[n_var/2] s_alpha; // standard deviation for intercepts
   
   vector[J] alpha; // intercept terms
   vector<lower=0>[J] rho; // scale parameters for beta distribution
@@ -68,12 +71,21 @@ model {
   for (v in 1:n_var/2) {
     beta_1[v] ~ normal(mu_beta_1[v],s_beta_1[v]);
     beta_2[v] ~ normal(mu_beta_2[v],s_beta_2[v]);
+    alpha[v] ~ normal(mu_alpha[v],s_alpha[v]);
+    //beta_2[v] ~ normal(0,sqrt(1));
   }
   // hyperpriors
   mu_beta_1 ~ normal(0,1);
   mu_beta_2 ~ normal(0,1);
-  s_beta_1 ~ cauchy(0,1);
-  s_beta_2 ~ cauchy(0,1);
+  mu_alpha ~ normal(0,2);
+  
+  //s_beta_1 ~ cauchy(0,1);
+  //s_beta_2 ~ cauchy(0,1);
+  
+  s_beta_1 ~ cauchy(0,0.5);
+  s_beta_2 ~ cauchy(0,0.5);
+  s_alpha ~ cauchy(0,1);
+  
   //s_beta_1 ~ student_t(4,0,1);
   //s_beta_2 ~ student_t(4,0,1);
   //s_beta_1 ~ exponential(1);
@@ -85,7 +97,8 @@ model {
   
   // factor loadings
   to_vector(Z) ~ normal(0,1);
-  to_vector(Lambda) ~ normal(0,1);
+  //to_vector(Lambda) ~ normal(0,1);
+  to_vector(Lambda) ~ normal(0,0.5);
   
   // likelihood terms
   for (i in 1:N) {
