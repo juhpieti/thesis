@@ -8,18 +8,28 @@ library(terra)
 
 #load in the training data
 load("data/estonia_new/train/train_2020_2021_n500.Rdata")
-df_sub <- train_n500
+dim(train_n500)
+
+load("data/estonia_new/train/train_2020_2021_all_species_n500.Rdata")
+dim(train_n500_all_species)
 
 # check how many presences in the data
-colSums(df_sub[,20:38] > 0)
-estonia_sub <- df_sub
+colSums(train_n500[,20:38] > 0)
+colSums(train_n500_all_species[,20:71] > 0)
 
-# remove species with less than 5 (0, 1, 2 in this case) observations
-estonia_sub <- estonia_sub[,!(colnames(estonia_sub) %in% c("Furcellaria lumbricalis loose form","Tolypella nidifica","Chara tomentosa"))]
+#estonia_sub <- train_n500[,20:38]
+estonia_sub <- train_n500_all_species[,20:71]
 
+# remove species with less than 3 (0, 1, 2 in this case) observations
+estonia_sub <- estonia_sub[,colSums(estonia_sub > 0) > 2]
+#estonia_sub <- estonia_sub[,!(colnames(estonia_sub) %in% c("Furcellaria lumbricalis loose form","Tolypella nidifica","Chara tomentosa"))]
 
-sp_list <- colnames(estonia_sub)[20:35]
-sp_list <- sp_list[c(2:6,10,13:14,7,9,11:12,15:16,1,8)] # order by the type of species (Vascular plants,  Algae etc.)
+estonia_sub <- estonia_sub[,!colnames(estonia_sub) == "Ranunculus peltatus subsp_ Baudotii"] #drop one more species for convenient J = 20 modeled species
+dim(estonia_sub)
+
+sp_list <- colnames(estonia_sub)
+#sp_list <- sp_list[c(2:6,10,13:14,7,9,11:12,15:16,1,8)] # order by the type of species (Vascular plants,  Algae etc.), case of 16 species
+sp_list <- sp_list[c(2:9,13,17:18,10,12,14:15,19:20,11,16,1)] # order by the type of species (Vascular plants,  Algae etc.), case of 20 species
 
 # plot the prevalences and the distribution of coverages for each species
 prevalences <- round(100*colMeans(estonia_sub[,sp_list] > 0),2)
@@ -30,13 +40,15 @@ breaks <- c(-bin_width, 0, seq(bin_width, 100, by=bin_width)) #create own bar fo
 
 im_width <- 800
 im_height <- 600
-subfolder <- paste0("n_",nrow(df_sub))
+subfolder <- paste0("n_",nrow(estonia_sub))
 
-png(paste0("plots/estonia_new/training_data/",subfolder,"/counts_with_prevalences.png"), width = im_width, height = im_height)
-par(mfrow = c(4,4),
+#png(paste0("plots/estonia_new/training_data/",subfolder,"/counts_with_prevalences.png"), width = im_width, height = im_height)
+png(paste0("plots/estonia_new/training_data/",subfolder,"/counts_with_prevalences_20_species.png"), width = im_width, height = im_height)
+
+par(mfrow = c(4,5),
     mar = c(4,4,2,1))
 for (sp_name in sp_list) {
-  hist(estonia_sub[,sp_name], main = sp_name, xlab = "coverage (%)", ylab = "count", ylim = c(0,nrow(df_sub)), xlim = c(0,100), breaks = breaks)
+  hist(estonia_sub[,sp_name], main = sp_name, xlab = "coverage (%)", ylab = "count", ylim = c(0,nrow(estonia_sub)), xlim = c(0,100), breaks = breaks)
   legend("topright", bty = "n", legend = paste0(prevalences[sp_name],"%"), col = "red")
 }
 dev.off()
