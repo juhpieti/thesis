@@ -38,7 +38,9 @@ sort(colSums(df_all_species[,20:71] > 0), decreasing = TRUE) # still quite many 
 sum(colSums(df_all_species[,20:71] > 0) > 0) # so 27/51 species are observed in these 3221 sites
 train <- df_all_species
 
-### compare how total mass compares with 4 species to 21 species
+
+### VISUALIZE THE DATA
+## compare how total mass compares with 4 species to 21 species
 sp_names <- c("Cladophora glomerata","Fucus vesiculosus","Mytilus trossulus","Stuckenia pectinata")
 Y_4 <- train[,sp_names]
 
@@ -80,15 +82,21 @@ for (i in 1:ncol(X)) {
 }
 
 ### fit the model
+# drop locations where 0 species are present
+tr.idx <- rowSums(Y_21) > 0 
+Y_21 <- Y_21[tr.idx, ]
+dim(Y_21)
+
+X <- X[tr.idx, ] # drop locations where 0 species are present
 X.scaled <- scale_covariates(X) #scale the covariates
 X.sec_ord <- add_second_order_terms(X.scaled,colnames(X.scaled)) #add second order terms
-Y_4sp.scaled <- Y_4/100
 
 # prepare data for stan
-data.list <- list(N = nrow(Y_4),
+data.list <- list(N = nrow(Y_21),
                   n_var = ncol(X.sec_ord),
-                  J = ncol(Y_4),
-                  Y = Y_4,
+                  J = ncol(Y_21),
+                  n_f = 2,
+                  Y = Y_21,
                   y_sum = rowSums(Y_21),
                   X = X.sec_ord)
 
@@ -97,17 +105,29 @@ n_chains <- 4
 n_iter <- 500
 
 # fit the model
-fit.2stage <- stan("stan_files/multivariate/2stage_JSDM.stan",
-                      data = data.list, chains = n_chains, iter = n_iter, seed = 42,
-                      pars = c("mu"), include = FALSE)
+fit.2stage.poisson.DirMult <- stan("stan_files/multivariate/2stage_JSDM_DirMultinomial_poisson.stan",
+                           data = data.list, chains = n_chains, iter = n_iter, seed = 42,
+                           pars = c("Mu_Dir", "mu_M"), include = FALSE)
 
-fit.2stage.gamma <- stan("stan_files/multivariate/2stage_JSDM_gamma.stan",
-                   data = data.list, chains = n_chains, iter = n_iter, seed = 42,
-                   pars = c("mu"), include = FALSE)
+fit.2stage.poisson.Mult <- stan("stan_files/multivariate/2stage_JSDM_Multinomial_poisson.stan",
+                           data = data.list, chains = n_chains, iter = n_iter, seed = 42,
+                           pars = c("Mu_Mult", "mu_M"), include = FALSE)
 
-fit.2stage.beta <- stan("stan_files/multivariate/2stage_JSDM_scaled_beta.stan",
-                         data = data.list, chains = n_chains, iter = n_iter, seed = 42,
-                         pars = c("mu"), include = FALSE)
+fit.2stage.NegBin.DirMult <- stan("stan_files/multivariate/2stage_JSDM_DirMultinomial_negbin.stan",
+                                 data = data.list, chains = n_chains, iter = n_iter, seed = 42,
+                                 pars = c("Mu_Dir", "mu_M"), include = FALSE)
+
+# fit.2stage <- stan("stan_files/multivariate/2stage_JSDM.stan",
+#                       data = data.list, chains = n_chains, iter = n_iter, seed = 42,
+#                       pars = c("mu"), include = FALSE)
+# 
+# fit.2stage.gamma <- stan("stan_files/multivariate/2stage_JSDM_gamma.stan",
+#                    data = data.list, chains = n_chains, iter = n_iter, seed = 42,
+#                    pars = c("mu"), include = FALSE)
+# 
+# fit.2stage.beta <- stan("stan_files/multivariate/2stage_JSDM_scaled_beta.stan",
+#                          data = data.list, chains = n_chains, iter = n_iter, seed = 42,
+#                          pars = c("mu"), include = FALSE)
 
 # save the models
 subfolder <- paste0("n_",nrow(Y_21),"/")
