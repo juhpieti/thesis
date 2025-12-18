@@ -51,15 +51,19 @@ parameters {
   
   // hierarchical priors for beta
   vector[n_var/2] mu_beta_1; // mean for first order terms
-  //vector<upper=0>[n_var/2] mu_beta_2; // mean for second order terms
-  vector<lower=0>[n_var/2] s_beta_1; // standard deviance for first order terms
-  //vector<lower=0>[n_var/2] s_beta_2; // standard deviance for second order terms
+  vector<upper=0>[n_var/2] mu_beta_2; // mean for second order terms
+  real mu_alpha; // mean for intercepts
+
+  vector<lower=0>[n_var/2] s_beta_1; // standard deviation for first order terms
+  vector<lower=0>[n_var/2] s_beta_2; // standard deviation for second order terms
+  real<lower=0> s_alpha; // standard deviation for intercepts
   
   vector[J] alpha; // intercept terms
   vector<lower=0>[J] rho; // scale parameters for beta distribution
   
   // latent factors & species loadings
-  matrix[n_obs_grid,n_f] Z; // N(0,1) to create n_f latent factors for spatial grid cells
+  matrix[n_obs_grid,n_f] Z_spat; // N(0,1) to create n_f spatially correlated latent factors
+  matrix[N,n_f] Z; // n_f latent factors for each sampling location (non-spatial)
   matrix[n_f,J] Lambda; // species loadings
   
   // spatial latent factors
@@ -73,16 +77,16 @@ transformed parameters{
     matrix[n_obs_grid,n_obs_grid] K; // covariance matrix
     matrix[n_obs_grid,n_obs_grid] L; // cholesky decomposition
     
-    K = gp_exponential_cov(s_array,1,l[k]); // use s = 1 for variance of 1 as in non-spatial latent factor model
+    K = gp_exponential_cov(s_array,0.5,l[k]); // reduce magnitude to s = 0.5 for total variance of 1 after adding non-spatial Z with 0.5 variance as well.
     K = K + diag_matrix(rep_vector(eps,n_obs_grid)); // jitter for stability
     L = cholesky_decompose(K);
     
-    phi[,k] = L*Z[,k]; //follows GP(0,K)
+    phi[,k] = L*Z_spat[,k]; //follows GP(0,K)
   }
   
   matrix[N,J] Mu; // gather the mean parameters for beta distribution in a matrix
   for (n in 1:N) {
-    Mu[n] = inv_logit(to_row_vector(alpha) + X[n]*append_row(beta_1,beta_2) + P[n]*phi*Lambda); // intercept + fixed effects + random effects
+    Mu[n] = inv_logit(to_row_vector(alpha) + X[n]*append_row(beta_1,beta_2) + (Z[n] + P[n]*phi) * Lambda); // intercept + fixed effects + random effects
   }
 }
 
@@ -90,24 +94,34 @@ model {
   // priors for coefficients
   for (v in 1:n_var/2) {
     beta_1[v] ~ normal(mu_beta_1[v],s_beta_1[v]);
-    //beta_2[v] ~ normal(mu_beta_2[v],s_beta_2[v]);
-    beta_2[v] ~ normal(0,sqrt(1));
+    beta_2[v] ~ normal(mu_beta_2[v],s_beta_2[v]);
   }
+  
+  alpha ~ normal(mu_alpha, s_alpha);
+  
   // hyperpriors
-  mu_beta_1 ~ normal(0,sqrt(1));
-  //mu_beta_2 ~ normal(0,1);
+  mu_beta_1 ~ normal(0,1);
+  mu_beta_2 ~ normal(0,1);
+  mu_alpha ~ normal(0,2);
   
-  s_beta_1 ~ cauchy(0,1);
+  //s_beta_1 ~ cauchy(0,1);
   //s_beta_2 ~ cauchy(0,1);
   
-  //s_beta_1 ~ cauchy(0,0.5);
-  //s_beta_2 ~ cauchy(0,1);
+  s_beta_1 ~ cauchy(0,0.5);
+  s_beta_2 ~ cauchy(0,0.5);
+  s_alpha ~ cauchy(0,1);
+  
+  //s_beta_1 ~ student_t(4,0,1);
+  //s_beta_2 ~ student_t(4,0,1);
+  //s_beta_1 ~ exponential(1);
+  //s_beta_2 ~ exponential(1);
 
-  alpha ~ normal(0,sqrt(2)); // intercepts
+  //alpha ~ normal(0,sqrt(2)); // intercepts
   rho ~ cauchy(0,sqrt(10)); // precision parameter
   
   // factor loadings
-  to_vector(Z) ~ normal(0,1);
+  to_vector(Z_spat) ~ normal(0,1); // for creating phi ~ GP(0,K)
+  to_vector(Z) ~ normal(0,0.5); // reduce variance from 1 to 0.5 for total variance of 1 (after spatial RE added)
   to_vector(Lambda) ~ normal(0,1);
   
   // length-scale parameters

@@ -59,10 +59,10 @@ model {
     Y[i] ~ dirichlet_multinomial(scale_Dir*to_vector(Mu_Dir[i]));
     // PROPORTIONS
     //Pi[i,] ~ dirichlet(scale_Dir*Mu_Dir[i,]);
+    // TOTAL COVER
+    y_sum[i] ~ neg_binomial_2(mu_M[i], scale_NegBin);
   }
   
-  // TOTAL COVER
-  y_sum ~ neg_binomial_2(mu_M, scale_NegBin);
   
   // PRIORS
   // Dirichlet component
@@ -81,4 +81,13 @@ model {
   to_vector(Z) ~ normal(0,1);
   //to_vector(Lambda) ~ normal(0,1);
   to_vector(Lambda) ~ normal(0,0.5);
+}
+
+generated quantities {
+  // log-likelihood for LOO-calculations
+  vector[N] log_lik;
+
+  for (i in 1:N) {
+    log_lik[i] = neg_binomial_2_lpmf(y_sum[i] | mu_M[i], scale_NegBin) + dirichlet_multinomial_lpmf(Y[i] | scale_Dir*to_vector(Mu_Dir[i]));
+  }
 }

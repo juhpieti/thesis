@@ -45,11 +45,11 @@ parameters {
   // hierarchical priors for beta
   vector[n_var/2] mu_beta_1; // mean for first order terms
   vector<upper=0>[n_var/2] mu_beta_2; // mean for second order terms
-  vector[n_var/2] mu_alpha; // mean for intercept
-  
+  real mu_alpha; // mean for intercepts
+
   vector<lower=0>[n_var/2] s_beta_1; // standard deviation for first order terms
   vector<lower=0>[n_var/2] s_beta_2; // standard deviation for second order terms
-  vector<lower=0>[n_var/2] s_alpha; // standard deviation for intercepts
+  real<lower=0> s_alpha; // standard deviation for intercepts
   
   vector[J] alpha; // intercept terms
   vector<lower=0>[J] rho; // scale parameters for beta distribution
@@ -71,9 +71,10 @@ model {
   for (v in 1:n_var/2) {
     beta_1[v] ~ normal(mu_beta_1[v],s_beta_1[v]);
     beta_2[v] ~ normal(mu_beta_2[v],s_beta_2[v]);
-    alpha[v] ~ normal(mu_alpha[v],s_alpha[v]);
-    //beta_2[v] ~ normal(0,sqrt(1));
   }
+  
+  alpha ~ normal(mu_alpha, s_alpha);
+  
   // hyperpriors
   mu_beta_1 ~ normal(0,1);
   mu_beta_2 ~ normal(0,1);
@@ -92,7 +93,7 @@ model {
   //s_beta_2 ~ exponential(1);
   
 
-  alpha ~ normal(0,sqrt(2)); // intercepts
+  //alpha ~ normal(0,sqrt(2)); // intercepts
   rho ~ cauchy(0,sqrt(10)); // precision parameter
   
   // factor loadings
