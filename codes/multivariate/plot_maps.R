@@ -1,0 +1,586 @@
+###########################################################################
+### SCRIPT TO ANALYSE RESULTS FROM FITTED JSDM BETA-REGRESSION MODELS   ###
+### INCLUDES CALCULATING LOO-CV, PLOTTING MAPS, DRAWING RESPONSE CURVES ###
+###########################################################################
+
+### models fitted with separate R-scripts (joint_beta_regression.R, joint_zi_beta_regression.R, joint_beta_regression_spatial.R, joint_zi_beta_regression_spatial.R)
+### this script loads fitted models and draws different maps and curves, as well as produces tables
+
+# load in packages
+library(terra)
+library(rstan)
+
+# load in helper functions
+source("codes/helpers.R")
+source("codes/multivariate/helpers_multivariate.R")
+
+# load in the training data
+load("data/estonia_new/train/train_2020_2021_all_species_n500.Rdata")
+train <- train_n500_all_species
+
+colnames(train)
+
+# prepare the covariate matrix
+X <- train[,11:19]
+#X$depth_to_secchi <- X$depth / X$zsd # add secchi/depth for a variable representing seafloor light level
+X$light_bottom <- exp(-1.7*X$depth / X$zsd)
+X <- X[,-which(colnames(X) == "zsd")] #remove secchi depth since it is not interesting for modeling in itself
+
+X.scaled <- scale_covariates(X)
+### add the second order terms
+X.sec_ord <- add_second_order_terms(X.scaled,colnames(X.scaled))
+
+Y <- train[,20:71]
+idx_positive <- colSums(Y > 0) > 2 # take only species that have some observations
+sum(idx_positive) # it's 21 of those
+Y_21 <- Y[,idx_positive]
+Y <- Y_21[,!colnames(Y_21) == "Ranunculus peltatus subsp_ Baudotii"] # drop 1 species for convenient J = 20
+
+# load in the predictive grid
+predictive_grid <- vect("data/estonia_new/predictive_grid_1km_all_variables_2021_july/predictive_grid_1km_all_variables_2021_july.shp")
+load("data/estonia_new/predictive_grid_1km_all_variables_2021_july.Rdata")
+dim(pred_grid_1km_2021_july_df)
+colnames(pred_grid_1km_2021_july_df)
+
+# add relative light level
+pred_grid_1km_2021_july_df$light_bottom <- exp(-1.7*pred_grid_1km_2021_july_df$depth/pred_grid_1km_2021_july_df$zsd)
+
+### load in spatial grid
+spatial_grid <- vect("data/estonia_new/spatial_random_effect_grid_20km/spatial_random_effect_grid_20km.shp")
+
+grid_centers <- centroids(spatial_grid)
+grid_centers.df <- as.data.frame(grid_centers, geom = "XY")
+grid_centers.df <- grid_centers.df[,c("x","y")]
+
+dim(grid_centers.df) # there are m = 191 grid cells
+
+### find the observed grid cells
+estonia_sub.vect <- vect(train, geom = c("x","y"), crs = "EPSG:3067")
+
+nearest_grid_center <- nearest(estonia_sub.vect, grid_centers)
+nearest_grid_center.df <- as.data.frame(nearest_grid_center)
+
+# n-length vector indicating the ID of the nearest grid center
+nearest_grid_center.vec <- nearest_grid_center.df$to_id
+
+# take the indexes of grid cells that has observations in them
+observed_grid_cells <- unique(nearest_grid_center.vec)
+observed_grid_cells.df <- grid_centers.df[observed_grid_cells,c("x","y")]
+
+# create the P matrix
+P <- matrix(0,ncol=length(observed_grid_cells),nrow=nrow(train))
+colnames(P) <- rownames(observed_grid_cells.df)
+for (i in 1:nrow(train)) {
+  P[i,as.character(nearest_grid_center.vec[i])] <- 1
+}
+
+### put the coordinates in km instead of meters
+observed_grid_cells.df <- observed_grid_cells.df/1000
+
+### PREPARE FUNCTIONS FOR PLOTTING
+
+plot_map <- function(pred_mat, locs, pred.grid.vect, type, title_chr = "", hotspot_proportion = 0.7, use_post_median = FALSE, plot_variance = FALSE) {
+  ### type: "cover", "hotspot", 
+  
+  #vals <- colMeans(pred_list$EY_sam)
+  vals <- if(use_post_median) {
+    apply(pred_mat,2,median)
+  } else {
+    colMeans(pred_mat)
+  }
+  #vars <- apply(pred_list$EY_sam,2,var)
+  vars <- apply(pred_mat,2,var)
+  test_df <- as.data.frame(cbind(locs, vals, vars))
+  
+  ### accumulative
+  test_df_ordered <- test_df[order(-test_df$vals), ]
+  test_df_ordered$hotspot <- 1
+  
+  # find when {hotspot_propprtion}% of the expected value is reached
+  tot_sum <- sum(test_df_ordered$vals)
+  idx <- which(cumsum(test_df_ordered$vals) > hotspot_proportion*tot_sum)[1]
+  
+  # set all outside to be non-hotspot
+  test_df_ordered[idx:nrow(test_df_ordered),"hotspot"] <- 0
+  
+  test_vect <- vect(test_df_ordered, geom=c("x","y"), crs = "EPSG:3067")
+  test_rast <- rast(ext = ext(pred.grid.vect), res = 1000, crs = "EPSG:3067")
+  r <- rasterize(test_vect, test_rast, field = "vals")
+  r.vars <- rasterize(test_vect, test_rast, field = "vars")
+  r.hotspot <- rasterize(test_vect, test_rast, field = "hotspot")
+  
+  if (type == "cover") {
+    if (plot_variance) {
+      plot(r.vars, colNA = "lightgrey", main = title_chr, xlab = "Easting (m)", ylab = "Northing (m)")
+    } else {
+      plot(r, colNA = "lightgrey", main = title_chr, xlab = "Easting (m)", ylab = "Northing (m)")
+    }
+  } else if (type == "hotspot") {
+    plot(r.hotspot, colNA = "lightgrey", main = title_chr, col = c("red","blue"),
+         #plg = list(title = "hotspot", legend = c("no","yes")),
+         legend = FALSE,
+         xlab = "Easting (m)", ylab = "Northing (m)")
+    #legend(583000,6362000, legend = c("yes","no"), title = "hotspot", col = c("blue","red"), pch = 15,cex = 1)
+    #legend("bottomright", legend = c("yes","no"), title = "hotspot", col = c("blue","red"), pch = 15,cex = 1, inset = c(0.001,0.04))
+    legend("bottomright", legend = c("yes","no"), title = "hotspot", col = c("blue","red"), pch = 15,cex = 0.75, inset = c(0.001,0.13))
+    
+  }
+}
+
+plot_map_JSDM <- function(pred_lists, locs, pred.grid.vect, type, hotspot_proportion, sp_names, summary_maps = FALSE, use_post_median = FALSE, plot_variance = FALSE) {
+  ###
+  # pred_lists: named list (by species name), each component is a list of predictions as a matrix (n_posterior_samples x n_prediction locations)
+  
+  n_species <- length(sp_names)
+  
+  if (!summary_maps) {
+    # prepare a grid for plotting, based on the number of species
+    n_rows <- floor(sqrt(n_species)) #prefer square type grid, e.g. 2x2, 3x3 if possible
+    n_cols <- ceiling(n_species/n_rows) #add so many columns that every species fit
+    par(mfrow = c(n_rows,n_cols))
+    
+    # plot each species separately
+    for(sp_name in sp_names) {
+      pred_list <- pred_lists[[sp_name]]
+      plot_map(pred_list$EY_sam,locs,pred.grid.vect,type,sp_name,hotspot_proportion,use_post_median,plot_variance)
+    }
+  } else {
+    ### 4 different plots
+    ## 1) total percent cover
+    ## 2) species richness
+    ## 3) Simpson index
+    ## 4) Shannon index
+    
+    # initialize matrices
+    nr <- nrow(pred_lists[[1]]$EY_sam)
+    nc <- ncol(pred_lists[[1]]$EY_sam)
+    
+    sum_mat <- sp_rich_mat <- simpson_mat <- shannon_mat <- matrix(0,nrow=nr,ncol=nc)
+    
+    # first calculate total percent cover and no. species present
+    for (j in 1:n_species) {
+      sum_mat <- sum_mat + pred_lists[[j]]$EY_sam
+      sp_rich_mat <- sp_rich_mat + (pred_lists[[j]]$y_sam > 0) 
+    }
+    
+    # for diversity indeces, calculate proportional covers p_ij, such that sum_j(p_ij) = 1 for each location i
+    for (j in 1:n_species) {
+      # relative cover for species j
+      p_j <- pred_lists[[j]]$EY_sam / sum_mat
+      # add j:th species contribution to simpson idx
+      simpson_mat <- simpson_mat + p_j^2
+      # add j:th species contribution to shannon idx
+      shannon_mat <- shannon_mat + p_j*log(p_j + 1e-12)
+    }
+    
+    # simpson index is defined as 1 - sum_j(p_j^2)
+    simpson_mat <- 1 - simpson_mat
+    
+    # shannon index is defined as -1*sum_j(p_j*ln(p_j))
+    shannon_mat <- -1*shannon_mat
+    
+    par(mfrow = c(2,2))
+    plot_map(sum_mat,locs,pred.grid.vect,type,"total percent cover",hotspot_proportion,use_post_median,plot_variance)
+    plot_map(sp_rich_mat,locs,pred.grid.vect,type,"species richness",hotspot_proportion,use_post_median,plot_variance)
+    plot_map(simpson_mat,locs,pred.grid.vect,type,"Simpson index",hotspot_proportion,use_post_median,plot_variance)
+    plot_map(shannon_mat,locs,pred.grid.vect,type,"Shannon index",hotspot_proportion,use_post_median,plot_variance)
+  }
+}
+
+plot_random_effects <- function(pred_list, locs, pred.grid.vect, type, title_chr = "", use_median = FALSE, plot_var = FALSE) {
+  ### type: "mu" or "pi"
+  
+  if (type == "mu") {
+    vals <- if(use_median) {
+      apply(pred_list$phi_mu_pred_sam,2,median)
+    } else {
+      colMeans(pred_list$phi_mu_pred_sam)
+    }
+    vars <- apply(pred_list$phi_mu_pred_sam,2,var)
+  } else if (type == "pi") {
+    vals <- if (use_median) {
+      apply(pred_list$phi_pi_pred_sam,2,median) 
+    } else {
+      colMeans(pred_list$phi_pi_pred_sam)
+    }
+    vars <- apply(pred_list$phi_pi_pred_sam,2,var)
+  }
+  test_df <- as.data.frame(cbind(locs, vals, vars))
+  
+  test_vect <- vect(test_df, geom=c("x","y"), crs = "EPSG:3067")
+  test_rast <- rast(ext = ext(pred.grid.vect), res = 1000, crs = "EPSG:3067")
+  r <- rasterize(test_vect, test_rast, field = "vals")
+  r.vars <- rasterize(test_vect, test_rast, field = "vars")
+  
+  if (type == "mu") {
+    title_str <- "RE"
+  }
+  
+  if (plot_var) {
+    plot(r.vars, colNA = "lightgrey", main = title_chr, plg = list(title = "RE (var)"), xlab = "Easting (m)", ylab = "Northing (m)")
+  } else {
+    plg_title <- ifelse(use_median,"RE (median)","RE (mean)")
+    plot(r, colNA = "lightgrey", main = title_chr, plg = list(title = plg_title), xlab = "Easting (m)", ylab = "Northing (m)")
+  }
+}
+
+plot_random_effects_JSDM <- function(pred_list,locs,pred.grid.vect,type,title_chr="",use_median = FALSE, plot_var = FALSE) {
+  ### type: "mu" or "pi"
+  
+  # how many latent factors are there in the model?
+  n_factors <- dim(pred_list$Z_mu_sam)[3]
+  
+  ### Think a better way to decide the size of grid here
+  par(mfrow = c(2,2))
+  
+  for (k in 1:n_factors) {
+    if (type == "mu") {
+      vals <- if (use_median) {
+        apply(pred_list$Z_mu_sam[,,k],2,median)
+      } else {
+        colMeans(pred_list$Z_mu_sam[,,k])
+      } 
+      vars <- apply(pred_list$Z_mu_sam[,,k],2,var)
+    } else {
+      vals <- colMeans(pred_list$Z_pi_sam[,,k])
+    }
+    
+    pred_df <- as.data.frame(cbind(locs,vals,vars))
+    pred_vect <- vect(pred_df, geom = c("x","y"), crs = "EPSG:3067")
+    pred_rast <- rast(ext = ext(pred.grid.vect), res = 1000, crs = "EPSG:3067")
+    r <- rasterize(pred_vect, pred_rast, field = "vals")
+    r.vars <- rasterize(pred_vect, pred_rast, field = "vars")
+    
+    if (plot_var) {
+      plot(r.vars, colNA = "lightgrey", main = title_chr, plg = list(title = paste0("Z",k," (var)")), xlab = "Easting (m)", ylab = "Northing (m)")
+    } else {
+      plg_title <- ifelse(use_median,paste0("Z",k," (median)"),paste0("Z",k," (mean)"))
+      plot(r, colNA = "lightgrey", main = title_chr, plg = list(title = plg_title), xlab = "Easting (m)", ylab = "Northing (m)")
+    }
+  }
+}
+
+plot_random_effects_2stage <- function(pred_list,locs,pred.grid.vect,title_chr="",use_median=FALSE,plot_var=FALSE) {
+  ### type: "mu" or "pi"
+  
+  # how many latent factors are there in the model?
+  n_factors <- dim(pred_list$Z_mu_sam)[3]
+  
+  ### Think a better way to decide the size of grid here
+  par(mfrow = c(2,2))
+  
+  for (k in 1:n_factors) {
+    vals <- if(use_median){
+      apply(pred_list$Z_mu_sam[,,k],2,median)
+    } else {
+      colMeans(pred_list$Z_mu_sam[,,k]) 
+    }
+    
+    vars <- apply(pred_list$Z_mu_sam[,,k],2,var)
+    pred_df <- as.data.frame(cbind(locs,vals,vars))
+    pred_vect <- vect(pred_df, geom = c("x","y"), crs = "EPSG:3067")
+    pred_rast <- rast(ext = ext(pred.grid.vect), res = 1000, crs = "EPSG:3067")
+    r <- rasterize(pred_vect, pred_rast, field = "vals")
+    r.vars <- rasterize(pred_vect, pred_rast, field = "vars")
+    
+    if(plot_var) {
+      plot(r.vars, colNA = "lightgrey", main = title_chr, plg = list(title = paste0("Z",k," (var)")), xlab = "Easting (m)", ylab = "Northing (m)")
+    } else {
+      plg_title <- ifelse(use_median,paste0("Z",k," (median)"),paste0("Z",k," (mean)"))
+      plot(r, colNA = "lightgrey", main = title_chr, plg = list(title = plg_title), xlab = "Easting (m)", ylab = "Northing (m)")
+    }
+  }
+  
+  # plot also the random effects for total cover
+  vals <- if(use_median) {
+    apply(pred_list$phi_M_sam,2,median)
+  } else {
+    colMeans(pred_list$phi_M_sam)
+  }
+  
+  vars <- apply(pred_list$phi_M_sam,2,var)
+  pred_df <- as.data.frame(cbind(locs,vals,vars))
+  pred_vect <- vect(pred_df, geom = c("x","y"), crs = "EPSG:3067")
+  pred_rast <- rast(ext = ext(pred.grid.vect), res = 1000, crs = "EPSG:3067")
+  r <- rasterize(pred_vect, pred_rast, field = "vals")
+  r.vars <- rasterize(pred_vect, pred_rast, field = "vars")
+  
+  if (plot_var) {
+    plot(r.vars, colNA = "lightgrey", main = title_chr, plg = list(title = "RE,Ytot (var)"), xlab = "Easting (m)", ylab = "Northing (m)")
+  } else {
+    plg_title <- ifelse(use_median,"RE,Ytot (median)","RE,Ytot (mean)")
+  }
+  plot(r, colNA = "lightgrey", main = title_chr, plg = list(title = plg_title), xlab = "Easting (m)", ylab = "Northing (m)")
+}
+
+
+# predict
+subfolder <- paste0("n_",nrow(X)) # find the correct folder for models
+thinning <- 200 ### CONSIDER SMALLER THINNING! WITH 4000 POST-SAMPLES THIS DRAWS ONLY 20 SAMPLES FOR MAPS (PREFERRED FOR QUICKER RESULTS)
+sp_names <- colnames(Y)
+use_post_median <- TRUE # use posterior median (instead of mean) for maps
+hotspot_proportion <- 0.8
+im_width <- 800
+im_height <- 600
+
+### 1) SSDM (non-spatial)
+# gather the predictions as lists
+SSDM_pred <- list()
+set.seed(123)
+for(sp_name in sp_names) {
+  print(sp_name)
+  sp_name_modified <- gsub(" ","_",sp_name)
+  sp_name_modified <- gsub("/","_",sp_name_modified)
+  mod <- readRDS(paste0("models/",subfolder,"/M1/",sp_name_modified,".rds"))
+  pred <- predict_beta_regression(mod,pred_grid_1km_2021_july_df[,colnames(X)],X,thinning,1,FALSE,1000,0,FALSE,0)
+  SSDM_pred[[sp_name]] <- pred
+}
+
+# scale predictions
+SSDM_pred <- scale_predictions(SSDM_pred, sp_names, 100)
+
+### PLOT AND SAVE MAPS
+# species-level maps
+### mean coverages
+png(paste0("plots/final_results/SSDM/",subfolder,"/M1/coverage_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(SSDM_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",hotspot_proportion,sp_names,summary_maps = FALSE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+### variances (put some plot_var = TRUE to plot_map() function?)
+#plot_map_JSDM(SSDM_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,summary_maps = FALSE,use_post_median = use_post_median, plot_variance = TRUE)
+
+### hotspots
+png(paste0("plots/final_results/SSDM/",subfolder,"/M1/hotspot_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(SSDM_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",hotspot_proportion,sp_names,summary_maps = FALSE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+# community maps
+### means
+png(paste0("plots/final_results/SSDM/",subfolder,"/M1/community_coverage_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(SSDM_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",hotspot_proportion,sp_names,summary_maps = TRUE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+### variances
+#plot_map_JSDM(SSDM_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",hotspot_proportion,sp_names,summary_maps = TRUE,use_post_median = use_post_median, plot_variance = TRUE)
+
+### hotspots?
+png(paste0("plots/final_results/SSDM/",subfolder,"/M1/community_hotspot_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(SSDM_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",hotspot_proportion,sp_names,summary_maps = TRUE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+### remove the predictions from memory!
+rm(SSDM_pred)
+
+### 2) SSDM (spatial)
+# gather the predictions as lists
+SSDM.spat_pred <- list()
+set.seed(123)
+for(sp_name in sp_names) {
+  sp_name_modified <- gsub(" ","_",sp_name)
+  sp_name_modified <- gsub("/","_",sp_name_modified)
+  mod <- readRDS(paste0("models/",subfolder,"/M3/",sp_name_modified,".rds"))
+  pred <- predict_spatial_beta_regression(mod,pred_grid_1km_2021_july_df[,colnames(X)],X,
+                                          pred_grid_1km_2021_july_df[,c("x","y")],
+                                          grid_centers.df/1000,observed_grid_cells.df,thinning,1,FALSE,1000)
+  SSDM.spat_pred[[sp_name]] <- pred
+}
+
+# scale predictions
+SSDM.spat_pred <- scale_predictions(SSDM.spat_pred, sp_names, 100)
+
+# species-level maps
+### mean coverages
+png(paste0("plots/final_results/SSDM/",subfolder,"/M3/coverage_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(SSDM.spat_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",hotspot_proportion,sp_names,summary_maps = FALSE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+### variances (put some plot_var = TRUE to plot_map() function?)
+#plot_map_JSDM(SSDM.spat_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,summary_maps = FALSE,use_post_median = use_post_median, plot_variance = TRUE)
+
+### hotspots
+png(paste0("plots/final_results/SSDM/",subfolder,"/M3/hotspot_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(SSDM.spat_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",hotspot_proportion,sp_names,summary_maps = FALSE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+# community maps
+### means
+png(paste0("plots/final_results/SSDM/",subfolder,"/M3/community_coverage_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(SSDM.spat_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",hotspot_proportion,sp_names,summary_maps = TRUE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+### variances
+#plot_map_JSDM(SSDM.spat_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",hotspot_proportion,sp_names,summary_maps = TRUE,use_post_median = use_post_median, plot_variance = TRUE)
+
+### hotspots?
+png(paste0("plots/final_results/SSDM/",subfolder,"/M3/community_hotspot_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(SSDM.spat_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",hotspot_proportion,sp_names,summary_maps = TRUE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+### spatial random effects
+png(paste0("plots/final_results/SSDM/",subfolder,"/M3/spatial_random_effects.png"), width = im_width, height = im_height)
+par(mfrow = c(4,5))
+for(sp_name in sp_names) {
+  plot_random_effects(SSDM.spat_pred[[sp_name]],pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"mu",sp_name,use_median = use_post_median,plot_var = FALSE)
+}
+dev.off()
+
+### remove the predictions from memory!
+rm(SSDM.spat_pred)
+
+### JSDM (non-spatial)
+mod.JSDM <- readRDS("models/multivariate/n_500/M1/JSDM_hier_priors.RDS")
+set.seed(123)
+JSDM_pred <- predict_beta_regression_JSDM(mod.JSDM,pred_grid_1km_2021_july_df[,colnames(X)],X,sp_names,2,thinning,1,FALSE,1000,0,FALSE,0)
+JSDM_pred <- scale_predictions(JSDM_pred, sp_names, 100)
+
+# species-level maps
+### mean coverages
+png(paste0("plots/final_results/JSDM/",subfolder,"/M1/coverage_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(JSDM_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",hotspot_proportion,sp_names,summary_maps = FALSE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+### variances (put some plot_var = TRUE to plot_map() function?)
+#plot_map_JSDM(SSDM_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,summary_maps = FALSE,use_post_median = use_post_median, plot_variance = TRUE)
+
+### hotspots
+png(paste0("plots/final_results/JSDM/",subfolder,"/M1/hotspot_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(JSDM_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",hotspot_proportion,sp_names,summary_maps = FALSE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+# community maps
+### means
+png(paste0("plots/final_results/JSDM/",subfolder,"/M1/community_coverage_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(JSDM_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",hotspot_proportion,sp_names,summary_maps = TRUE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+### variances
+#plot_map_JSDM(JSDM_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",hotspot_proportion,sp_names,summary_maps = TRUE,use_post_median = use_post_median, plot_variance = TRUE)
+
+### hotspots
+png(paste0("plots/final_results/JSDM/",subfolder,"/M1/community_hotspot_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(JSDM_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",hotspot_proportion,sp_names,summary_maps = TRUE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+### remove the predictions from memory!
+rm(JSDM_pred)
+
+### JSDM (spatial)
+mod.JSDM.spat <- readRDS("models/multivariate/n_500/M3/JSDM_spatial_hier_priors.RDS")
+set.seed(123)
+JSDM.spat_pred <- predict_spatial_beta_regression_JSDM(mod.JSDM.spat,pred_grid_1km_2021_july_df[,colnames(X)],X,pred_grid_1km_2021_july_df[,c("x","y")],
+                                                       grid_centers.df/1000,observed_grid_cells.df,sp_names,2,thinning,1,FALSE,1000,0)
+JSDM.spat_pred <- scale_predictions(JSDM.spat_pred, sp_names, 100)
+
+# species-level maps
+### mean coverages
+png(paste0("plots/final_results/JSDM/",subfolder,"/M3/coverage_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(JSDM.spat_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",hotspot_proportion,sp_names,summary_maps = FALSE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+### variances (put some plot_var = TRUE to plot_map() function?)
+#plot_map_JSDM(JSDM.spat_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,summary_maps = FALSE,use_post_median = use_post_median, plot_variance = TRUE)
+
+### hotspots
+png(paste0("plots/final_results/JSDM/",subfolder,"/M3/hotspot_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(JSDM.spat_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",hotspot_proportion,sp_names,summary_maps = FALSE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+# community maps
+### means
+png(paste0("plots/final_results/JSDM/",subfolder,"/M3/community_coverage_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(JSDM.spat_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",hotspot_proportion,sp_names,summary_maps = TRUE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+### variances
+#plot_map_JSDM(JSDM.spat_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",hotspot_proportion,sp_names,summary_maps = TRUE,use_post_median = use_post_median, plot_variance = TRUE)
+
+### hotspots
+png(paste0("plots/final_results/JSDM/",subfolder,"/M3/community_hotspot_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(JSDM.spat_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",hotspot_proportion,sp_names,summary_maps = TRUE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+### spatial random effects
+png(paste0("plots/final_results/JSDM/",subfolder,"/M3/spatial_random_effects.png"), width = im_width, height = im_height)
+plot_random_effects_JSDM(JSDM.spat_pred, pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"mu","",use_median = use_post_median, plot_var = FALSE)
+dev.off()
+
+### remove the predictions from memory!
+rm(JSDM.spat_pred)
+
+### 2-stage (non-spatial)
+mod.2stage <- readRDS("models/two_stage/n_500/M1/JSDM_NegBin_DirMult_hier_priors.RDS")
+set.seed(123)
+pred_2stage <- predict_DirMult_NegBin_regression(mod.2stage,pred_grid_1km_2021_july_df[,colnames(X)],X,sp_names,2,thinning)
+
+# species-level maps
+### mean coverages
+png(paste0("plots/final_results/two_stage/",subfolder,"/M1/coverage_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(pred_2stage,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",hotspot_proportion,sp_names,summary_maps = FALSE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+### variances (put some plot_var = TRUE to plot_map() function?)
+#plot_map_JSDM(SSDM_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,summary_maps = FALSE,use_post_median = use_post_median, plot_variance = TRUE)
+
+### hotspots
+png(paste0("plots/final_results/two_stage/",subfolder,"/M1/hotspot_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(pred_2stage,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",hotspot_proportion,sp_names,summary_maps = FALSE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+# community maps
+### means
+png(paste0("plots/final_results/two_stage/",subfolder,"/M1/community_coverage_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(pred_2stage,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",hotspot_proportion,sp_names,summary_maps = TRUE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+### variances
+#plot_map_JSDM(pred_2stage,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",hotspot_proportion,sp_names,summary_maps = TRUE,use_post_median = use_post_median, plot_variance = TRUE)
+
+### hotspots?
+png(paste0("plots/final_results/two_stage/",subfolder,"/M1/community_hotspot_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(pred_2stage,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",hotspot_proportion,sp_names,summary_maps = TRUE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+### remove the predictions from memory!
+rm(pred_2stage)
+
+### 2-stage (spatial)
+mod.2stage.spat <- readRDS("models/two_stage/n_500/M3/JSDM_NegBin_DirMult_spatial_hier_priors.RDS")
+set.seed(123)
+pred.spat_2stage <- predict_spatial_DirMult_NegBin_regression(mod.2stage.spat,pred_grid_1km_2021_july_df[,colnames(X)],X,pred_grid_1km_2021_july_df[,c("x","y")],
+                                                              grid_centers.df/1000,observed_grid_cells.df,sp_names,2,thinning)
+
+# species-level maps
+### mean coverages
+png(paste0("plots/final_results/two_stage/",subfolder,"/M3/coverage_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(pred.spat_2stage,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",hotspot_proportion,sp_names,summary_maps = FALSE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+### variances (put some plot_var = TRUE to plot_map() function?)
+#plot_map_JSDM(SSDM_pred,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,summary_maps = FALSE,use_post_median = use_post_median, plot_variance = TRUE)
+
+### hotspots
+png(paste0("plots/final_results/two_stage/",subfolder,"/M3/hotspot_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(pred.spat_2stage,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",hotspot_proportion,sp_names,summary_maps = FALSE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+# community maps
+### means
+png(paste0("plots/final_results/two_stage/",subfolder,"/M3/community_coverage_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(pred.spat_2stage,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",hotspot_proportion,sp_names,summary_maps = TRUE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+### variances
+#plot_map_JSDM(pred_2stage,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",hotspot_proportion,sp_names,summary_maps = TRUE,use_post_median = use_post_median, plot_variance = TRUE)
+
+### hotspots?
+png(paste0("plots/final_results/two_stage/",subfolder,"/M3/community_hotspot_maps.png"), width = im_width, height = im_height)
+plot_map_JSDM(pred.spat_2stage,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"hotspot",hotspot_proportion,sp_names,summary_maps = TRUE,use_post_median = use_post_median, plot_variance = FALSE)
+dev.off()
+
+### spatial random effects
+png(paste0("plots/final_results/two_stage/",subfolder,"/M3/spatial_random_effects.png"), width = im_width, height = im_height)
+plot_random_effects_2stage(pred.spat_2stage, pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"",use_median = use_post_median, plot_var = FALSE)
+dev.off()
+
+### remove the predictions from memory!
+rm(pred.spat_2stage)
