@@ -49,6 +49,7 @@ Y <- train[,20:71]
 idx_positive <- colSums(Y > 0) > 0 # take only species that have some observations
 sum(idx_positive) # it's 21 of those
 Y_21 <- Y[,idx_positive]
+Y <- Y_21[,!colnames(Y_21) == "Ranunculus peltatus subsp_ Baudotii"] # drop 1 species for convenient J = 20
 
 ### see the distributions both on normal scale and log-scale
 total_mass_4sp <- rowSums(Y_4)
@@ -82,22 +83,16 @@ for (i in 1:ncol(X)) {
 }
 
 ### fit the model
-# drop locations where 0 species are present
-tr.idx <- rowSums(Y_21) > 0 
-Y_21 <- Y_21[tr.idx, ]
-dim(Y_21)
-
-X <- X[tr.idx, ] # drop locations where 0 species are present
 X.scaled <- scale_covariates(X) #scale the covariates
 X.sec_ord <- add_second_order_terms(X.scaled,colnames(X.scaled)) #add second order terms
 
 # prepare data for stan
-data.list <- list(N = nrow(Y_21),
+data.list <- list(N = nrow(Y),
                   n_var = ncol(X.sec_ord),
-                  J = ncol(Y_21),
+                  J = ncol(Y),
                   n_f = 2,
-                  Y = Y_21,
-                  y_sum = rowSums(Y_21),
+                  Y = Y,
+                  y_sum = rowSums(Y),
                   X = X.sec_ord)
 
 # stan input parameters
@@ -105,17 +100,28 @@ n_chains <- 4
 n_iter <- 500
 
 # fit the model
-fit.2stage.poisson.DirMult <- stan("stan_files/multivariate/2stage_JSDM_DirMultinomial_poisson.stan",
-                           data = data.list, chains = n_chains, iter = n_iter, seed = 42,
-                           pars = c("Mu_Dir", "mu_M"), include = FALSE)
+# fit.2stage.poisson.DirMult <- stan("stan_files/multivariate/2stage_JSDM_DirMultinomial_poisson.stan",
+#                            data = data.list, chains = n_chains, iter = n_iter, seed = 42,
+#                            pars = c("Mu_Dir", "mu_M"), include = FALSE)
+# 
+# fit.2stage.poisson.DirMult.hier_priors <- stan("stan_files/multivariate/2stage_JSDM_DirMultinomial_poisson_hier_priors.stan",
+#                                    data = data.list, chains = n_chains, iter = n_iter, seed = 42,
+#                                    pars = c("Mu_Dir", "mu_M"), include = FALSE)
 
-fit.2stage.poisson.Mult <- stan("stan_files/multivariate/2stage_JSDM_Multinomial_poisson.stan",
-                           data = data.list, chains = n_chains, iter = n_iter, seed = 42,
-                           pars = c("Mu_Mult", "mu_M"), include = FALSE)
 
 fit.2stage.NegBin.DirMult <- stan("stan_files/multivariate/2stage_JSDM_DirMultinomial_negbin.stan",
                                  data = data.list, chains = n_chains, iter = n_iter, seed = 42,
-                                 pars = c("Mu_Dir", "mu_M"), include = FALSE)
+                                 pars = c("Mu_Dir", "mu_M", "z_M"), include = FALSE)
+
+# fit.2stage.NegBin.DirMult.hier_priors <- stan("stan_files/multivariate/2stage_JSDM_DirMultinomial_NegBin_hier_priors.stan",
+#                                   data = data.list, chains = n_chains, iter = n_iter, seed = 42,
+#                                   pars = c("Mu_Dir", "mu_M"), include = FALSE)
+
+# save the models
+subfolder <- paste0("n_",nrow(Y),"/")
+saveRDS(fit.2stage.NegBin.DirMult, paste0("models/two_stage/",subfolder,"M1/JSDM_NegBin_DirMult.RDS"))
+#saveRDS(fit.2stage.NegBin.DirMult.hier_priors, paste0("models/two_stage/",subfolder,"M1/JSDM_NegBin_DirMult_hier_priors.RDS"))
+
 
 # fit.2stage <- stan("stan_files/multivariate/2stage_JSDM.stan",
 #                       data = data.list, chains = n_chains, iter = n_iter, seed = 42,
@@ -129,18 +135,15 @@ fit.2stage.NegBin.DirMult <- stan("stan_files/multivariate/2stage_JSDM_DirMultin
 #                          data = data.list, chains = n_chains, iter = n_iter, seed = 42,
 #                          pars = c("mu"), include = FALSE)
 
-# save the models
-subfolder <- paste0("n_",nrow(Y_21),"/")
-saveRDS(fit.2stage, paste0("models/multivariate/",subfolder,"/two_stage_model/JSDM_2stage_21species.RDS"))
-saveRDS(fit.2stage.gamma, paste0("models/multivariate/",subfolder,"/two_stage_model/JSDM_2stage_21species_gamma.RDS"))
+
 
 
 ### examine output
 fit.2stage <- readRDS("models/multivariate/n_100/two_stage_model/JSDM_2stage_21species.RDS")
 
-# response curves
+### response curves
 
-# post pred checks
+### post pred checks
 
 par(mfrow = c(4,4),
     mar = c(4,4,2,0))
@@ -452,4 +455,64 @@ par(mfrow = c(1,1))
 pred_list.scaled_beta <- predict_scaled_beta(fit.2stage.beta, pred_grid_1km_2021_july_df[,colnames(X)], X, 20, 200)
 plot_map(pred_list.scaled_beta$EY_sam,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover","expected percent cover",0.7)
 
+
+### CHECK THE CONVERGENCE OF CORR.MATRIX
+post.samples <- extract(fit.2stage.poisson.DirMult)
+post.samples.array <- as.array(fit.2stage.poisson.DirMult)
+
+n_species <- ncol(Y)
+sp_names <- colnames(Y)
+n_factors <- 2
+n_samples <- dim(post.samples.array)[1]
+n_chains <- dim(post.samples.array)[2]
+R_hats <- c()
+res_list <- list("mean(R)" = matrix(0,nrow=n_species,ncol=n_species,dimnames = list(sp_names,sp_names)),
+                 "Pr(R>0)" = matrix(0,nrow=n_species,ncol=n_species,dimnames = list(sp_names,sp_names)),
+                 "Pr(R<0)" = matrix(0,nrow=n_species,ncol=n_species,dimnames = list(sp_names,sp_names)))
+
+names_of_rows <- c()
+par(mfrow = c(5,5),
+    mar = c(2,2,2,0))
+for(i in 1:(n_species-1)) {
+  for (j in (i+1):n_species) {
+    Sigma_ij <- matrix(0,nrow=n_samples,ncol=n_chains)
+    Sigma_ii <- matrix(0,nrow=n_samples,ncol=n_chains)
+    Sigma_jj <- matrix(0,nrow=n_samples,ncol=n_chains)
+    for (k in 1:n_factors) {
+      L_ki <- post.samples.array[,,paste0("Lambda[",k,",",i,"]")]
+      L_kj <- post.samples.array[,,paste0("Lambda[",k,",",j,"]")]
+      Sigma_ij <- Sigma_ij + L_ki*L_kj
+      Sigma_ii <- Sigma_ii + L_ki^2
+      Sigma_jj <- Sigma_jj + L_kj^2
+    }
+    # from covariance to correlation
+    R_ij <- Sigma_ij / (sqrt(Sigma_ii)*sqrt(Sigma_jj))
+    
+    # calculate R-hat
+    Rh <- Rhat(R_ij)
+    R_hats[paste0("S_",i,j)] <- Rh
+    
+    # save posterior mean, Pr(R_ij > 0) and Pr(R_ij < 0)
+    res_list[[1]][i,j] <- mean(R_ij)
+    res_list[[2]][i,j] <- mean(R_ij > 0)
+    res_list[[3]][i,j] <- mean(R_ij < 0)
+    
+    # plot chains
+    matplot(Sigma_ij, type = "l", lty = 1, lwd = 2, col = 1:n_chains)
+    legend("bottomleft", legend = paste0("Rhat: ", round(Rh,2)), bty = "n", col = "red")
+  }
+}
+
+### try to visualize correlation matrix
+
+# 1) just posterior means
+par(mfrow = c(1,1))
+corrplot(res_list$`mean(R`, type = "upper", order = "original")
+
+# 2) different colors for 1) positive correlation 2) negative correlation 3) no correlation (overlaps with 0)
+
+R_mat_categorical <- matrix(0,nrow=n_species,ncol=n_species,dimnames=list(sp_names,sp_names))
+R_mat_categorical[which(res_list$`Pr(R>0` > 0.95)] <- 1
+R_mat_categorical[which(res_list$`Pr(R<0` > 0.95)] <- -1
+corrplot(R_mat_categorical, type = "upper", order = "original")
 

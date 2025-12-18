@@ -144,7 +144,7 @@ colnames(cor.mat) <- rownames(cor.mat) <- colnames(Y)
 cor.mat
 
 
-################################## TRY THE LIMITS OF THE MODEL BY INTRODUCING MORE SPECIES ################################
+################################## RUN ALL 20 SPECIES ################################
 
 
 # load in the dataset (n=100)
@@ -169,7 +169,9 @@ X <- X[,-which(colnames(X) == "zsd")] #remove secchi depth since it is not inter
 
 # correlation plot for species percent covers (to start with, take some correlating species for modeling task)
 Y <- train[,20:71]
-Y <- Y[,colSums(Y>0)>0] #take only species with > 0 appearances
+Y <- Y[,colSums(Y>0)>2] #take only species with > 0 appearances
+Y <- Y[,!colnames(Y) == "Ranunculus peltatus subsp_ Baudotii"] # drop 1 species for convenient J = 20
+
 cor.mat <- cor(Y)
 par(mfrow = c(1,1))
 corrplot(cor.mat, type = "upper", order = "hclust", method = "number", number.cex = 0.6)
@@ -193,26 +195,17 @@ n_chains <- 4
 n_iter <- 2000
 
 # fit the model
-fit.beta.JSDM <- stan("stan_files/multivariate/left_censored_beta_regression_multivariate.stan",
-                      data = data.list, chains = n_chains, iter = n_iter, seed = 42,
-                      pars = c("Mu"), include = FALSE)
-
-n_chains <- 4
-n_iter <- 500
-start.time <- Sys.time()
-fit.beta.JSDM.n500 <- stan("stan_files/multivariate/left_censored_beta_regression_multivariate.stan",
-                      data = data.list, chains = n_chains, iter = n_iter, seed = 42,
-                      pars = c("Mu"), include = FALSE)
-end.time <- Sys.time()
-print(end.time - start.time)
-
-subfolder <- paste0("n_",nrow(Y.scaled),"/")
-saveRDS(fit.beta.JSDM.n500, file = paste0("models/multivariate/",subfolder,"M1/JSDM_21_species.RDS"))
+# fit.beta.JSDM <- stan("stan_files/multivariate/left_censored_beta_regression_multivariate.stan",
+#                       data = data.list, chains = n_chains, iter = n_iter, seed = 42,
+#                       pars = c("Mu"), include = FALSE)
+# 
+# subfolder <- paste0("n_",nrow(Y.scaled),"/")
+# saveRDS(fit.beta.JSDM.n500, file = paste0("models/multivariate/",subfolder,"M1/JSDM_21_species.RDS"))
 
 ### SAVE THE MODEL FIT(s) ###
-subfolder <- paste0("n_",nrow(Y.scaled),"/")
-
-saveRDS(fit.beta.JSDM, file = paste0("models/multivariate/",subfolder,"M1/JSDM_21species_Lambda_N0_05.RDS"))
+# subfolder <- paste0("n_",nrow(Y.scaled),"/")
+# 
+# saveRDS(fit.beta.JSDM, file = paste0("models/multivariate/",subfolder,"M1/JSDM_21species_Lambda_N0_05.RDS"))
 
 # # fit the alternative model where rho(x) is modeled by covariates
 # fit.beta.JSDM.rho.modeled <- stan("stan_files/multivariate/scaled_sigmoid/left_censored_beta_regression_multivariate.stan",
@@ -225,26 +218,29 @@ fit.beta.JSDM.hier.priors <- stan("stan_files/multivariate/left_censored_beta_re
                                   data = data.list, chains = n_chains, iter = n_iter, seed = 42,
                                   pars = c("Mu"), include = FALSE)
 # 
-saveRDS(fit.beta.JSDM.hier.priors, file = paste0("models/multivariate/",subfolder,"M1/JSDM_21species_hierarchical_priors.RDS"))
+
+### SAVE THE MODEL FIT(s) ###
+subfolder <- paste0("n_",nrow(Y.scaled),"/")
+saveRDS(fit.beta.JSDM.hier.priors, file = paste0("models/multivariate/",subfolder,"M1/JSDM_hier_priors.RDS"))
 
 
  
-# fit the alternative model with gamma shrinkage prior for Lambda (from Ovaskainen book)
-fit.beta.JSDM.gamma.priors <- stan("stan_files/multivariate/left_censored_beta_regression_multivariate_gamma_shrinkage_priors.stan",
-                                   data = data.list, chains = n_chains, iter = n_iter, seed = 42,
-                                   pars = c("Mu"), include = FALSE)
-
-subfolder <- paste0("n_",nrow(Y.scaled),"/")
-saveRDS(fit.beta.JSDM.gamma.priors, file = paste0("models/multivariate/",subfolder,"M1/JSDM_21_species_gamma_priors.RDS"))
-
-
-# fit the alternative model with both gamma shrinkage for Lambda and hierarchical prior for beta
-fit.beta.JSDM.hier.gamma.priors <- stan("stan_files/multivariate/left_censored_beta_regression_multivariate_gamma_shrinkage_and_hierarchical_priors.stan",
-                                        data = data.list, chains = n_chains, iter = n_iter, seed = 42,
-                                        pars = c("Mu"), include = FALSE)
-
-subfolder <- paste0("n_",nrow(Y.scaled),"/")
-saveRDS(fit.beta.JSDM.hier.gamma.priors, file = paste0("models/multivariate/",subfolder,"M1/JSDM_21_species_hier_and_gamma_priors.RDS"))
+# # fit the alternative model with gamma shrinkage prior for Lambda (from Ovaskainen book)
+# fit.beta.JSDM.gamma.priors <- stan("stan_files/multivariate/left_censored_beta_regression_multivariate_gamma_shrinkage_priors.stan",
+#                                    data = data.list, chains = n_chains, iter = n_iter, seed = 42,
+#                                    pars = c("Mu"), include = FALSE)
+# 
+# subfolder <- paste0("n_",nrow(Y.scaled),"/")
+# saveRDS(fit.beta.JSDM.gamma.priors, file = paste0("models/multivariate/",subfolder,"M1/JSDM_21_species_gamma_priors.RDS"))
+# 
+# 
+# # fit the alternative model with both gamma shrinkage for Lambda and hierarchical prior for beta
+# fit.beta.JSDM.hier.gamma.priors <- stan("stan_files/multivariate/left_censored_beta_regression_multivariate_gamma_shrinkage_and_hierarchical_priors.stan",
+#                                         data = data.list, chains = n_chains, iter = n_iter, seed = 42,
+#                                         pars = c("Mu"), include = FALSE)
+# 
+# subfolder <- paste0("n_",nrow(Y.scaled),"/")
+# saveRDS(fit.beta.JSDM.hier.gamma.priors, file = paste0("models/multivariate/",subfolder,"M1/JSDM_21_species_hier_and_gamma_priors.RDS"))
 
 
 ### examine the interspecific correlations

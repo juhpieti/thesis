@@ -157,7 +157,7 @@ colnames(cor.mat) <- rownames(cor.mat) <- colnames(Y)
 cor.mat
 
 
-################################## TRY THE LIMITS OF THE MODEL BY INTRODUCING MORE SPECIES ################################
+################################## RUN ALL 20 SPECIES ################################
 
 # load in the dataset (n=100)
 load("data/estonia_new/train/train_2020_2021_all_species_n100.Rdata")
@@ -181,7 +181,9 @@ X <- X[,-which(colnames(X) == "zsd")] #remove secchi depth since it is not inter
 
 # correlation plot for species percent covers (to start with, take some correlating species for modeling task)
 Y <- train[,20:71]
-Y <- Y[,colSums(Y>0)>0] #take only species with > 0 appearances
+Y <- Y[,colSums(Y>0)>2] #take only species with > 0 appearances
+Y <- Y[,!colnames(Y) == "Ranunculus peltatus subsp_ Baudotii"] # drop 1 species for convenient J = 20
+
 cor.mat <- cor(Y)
 par(mfrow = c(1,1))
 corrplot(cor.mat, type = "upper", order = "hclust", method = "number", number.cex = 0.6)
@@ -247,16 +249,14 @@ data.spat.list <- list(N = nrow(Y.scaled),
 
 fit.beta.JSDM.spatial.hier.priors <- stan("stan_files/multivariate/left_censored_beta_regression_spatial_multivariate_hier_priors.stan",
                               data = data.spat.list, chains = n_chains, iter = n_iter, seed = 42,
-                              pars = c("Mu"), include = FALSE)
+                              pars = c("Mu","Z_spat"), include = FALSE)
 
 ### SAVE THE MODEL FIT
 subfolder <- paste0("n_",nrow(Y.scaled),"/")
-#saveRDS(fit.beta.JSDM.spatial, file = paste0("models/multivariate/",subfolder,"JSDM_spatial_test.RDS"))
-saveRDS(fit.beta.JSDM.spatial.hier.priors, file = paste0("models/multivariate/",subfolder,"/M3/JSDM_21_species_spatial_hier_priors_jitter.RDS"))
+saveRDS(fit.beta.JSDM.spatial.hier.priors, file = paste0("models/multivariate/",subfolder,"/M3/JSDM_spatial_hier_priors.RDS"))
 
 
 ### EXAMINE THE MODEL FIT
-fit.beta.JSDM.spatial <- readRDS("models/multivariate/JSDM_spatial_test.RDS")
 fit.beta.JSDM.spatial <- readRDS("models/multivariate/n_500/M3/JSDM_21_species_spatial_hier_priors_jitter.RDS")
 
 ### VISUALIZE SITE LOADINGS (color with some missing variables?)
@@ -301,6 +301,8 @@ cor.mat
 
 #fit.beta.JSDM.spatial <- readRDS("models/multivariate/n_100/M3/JSDM_21_species_spatial_hier_priors.RDS")
 fit.beta.JSDM.spatial <- readRDS("models/multivariate/n_500/M3/JSDM_21_species_spatial_hier_priors_jitter.RDS")
+fit.beta.JSDM.spatial <- readRDS("models/multivariate/n_500/M3/JSDM_21_species_spatial_hier_priors_final.RDS")
+
 
 Rhats <- summary(fit.beta.JSDM.spatial)$summary[,"Rhat"]
 sort(Rhats,decreasing = TRUE) # there are some non-converging chains

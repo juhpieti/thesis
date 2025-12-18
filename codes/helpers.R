@@ -773,10 +773,9 @@ predict_spatial_ZI_beta_regression <- function(stan_fit, X.pred, X.orig, pred.lo
               rho_sample = rho_sample))
 }
   
-####### UNEXAMINED FROM THIS ONWARDS #################
 
+### THESE FUNCTIONS TO DRAW RESPONSE CURVES ARE PROBABLY WORTH TO REWRITE, SINCE I DID IT IN A VERY UGLY WAY IN MY OPINION!!!
 
-### IS THIS THE SAME THAN USED IN ANALYSE_RESULTS?
 plot_and_save_responses <- function(mod_list,X,grid_length = 200,im_width,im_height,thinning=200) {
   
   grid_matrix <- matrix(0,nrow = grid_length, ncol = ncol(X))
