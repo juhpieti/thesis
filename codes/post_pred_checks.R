@@ -163,7 +163,7 @@ pp_check_beta <- function(mod,y,X,n_rep=50,bin_width = 0.05,test_quantities=FALS
     # save the test statistics
     T_probzero <- c(T_probzero, mean(y_rep==0))
     T_mean <- c(T_mean, mean(y_rep))
-    T_mean_positive <- c(T_mean_positive, mean(y_rep[y_rep > 0]))
+    T_mean_positive <- c(T_mean_positive, ifelse(any(y_rep > 0), mean(y_rep[y_rep > 0]), 0))
     T_max <- c(T_max, max(y_rep))
     
     # save the dataset
@@ -352,7 +352,7 @@ pp_check_ZIbeta <- function(mod,y,X,n_rep,bin_width=0.05, test_quantities = FALS
     # save the test statistics
     T_probzero <- c(T_probzero, mean(y_rep==0))
     T_mean <- c(T_mean, mean(y_rep))
-    T_mean_positive <- c(T_mean_positive, mean(y_rep[y_rep > 0]))
+    T_mean_positive <- c(T_mean_positive, ifelse(any(y_rep > 0), mean(y_rep[y_rep > 0]), 0))
     T_max <- c(T_max, max(y_rep))
   }
   
@@ -471,6 +471,9 @@ pp_check_beta_spat <- function(mod,y,X,P,n_rep,bin_width=0.05, test_quantities =
   T_mean_positive <- c() #mean(y) for all y > 0
   T_max <- c() # max(y)
   
+  # initialize matrix to save the replicated datasets (can be used later to do community level PP-checks)
+  y_rep_mat <- c()
+  
   # make n_rep replications of new data, compare to observed coverages
   rep_idx <- sample(1:nrow(beta.sam),n_rep,replace = FALSE) #randomly take n_rep sets of posterior samples
   plot_idx <- sample(rep_idx,15,replace=FALSE) #take 15 to draw the histograms with observed dataset
@@ -502,7 +505,7 @@ pp_check_beta_spat <- function(mod,y,X,P,n_rep,bin_width=0.05, test_quantities =
     } else {
       rho <- rep(rho.sam[idx,],nrow(X)) #common rho
     }
-
+    
     # sample latent beta variables
     V <- rbeta(nrow(X),mu*rho,(1-mu)*rho)
     # scale & left-censor
@@ -518,8 +521,11 @@ pp_check_beta_spat <- function(mod,y,X,P,n_rep,bin_width=0.05, test_quantities =
     # save the test statistics
     T_probzero <- c(T_probzero, mean(y_rep==0))
     T_mean <- c(T_mean, mean(y_rep))
-    T_mean_positive <- c(T_mean_positive, mean(y_rep[y_rep > 0]))
+    T_mean_positive <- c(T_mean_positive, ifelse(any(y_rep > 0), mean(y_rep[y_rep > 0]), 0))
     T_max <- c(T_max, max(y_rep))
+    
+    # save the dataset
+    y_rep_mat <- rbind(y_rep_mat, y_rep)
   }
   
   ### draw histograms of test statistics
@@ -577,11 +583,12 @@ pp_check_beta_spat <- function(mod,y,X,P,n_rep,bin_width=0.05, test_quantities =
     legend("topleft",legend=paste0("p-value: ", round(mean_positive_pvalue,2)), bty = "n")
     
     # return the observed bayesian p-values
-    return(c(probzero_pval = probzero_pvalue,
-             max_pval = max_pvalue,
-             mean_pval = mean_pvalue,
-             mean_positive_pval = mean_positive_pvalue))
+    # return(c(probzero_pval = probzero_pvalue,
+    #          max_pval = max_pvalue,
+    #          mean_pval = mean_pvalue,
+    #          mean_positive_pval = mean_positive_pvalue))
   }
+  return(y_rep_mat)
 }
 
 # test that the function works
@@ -690,7 +697,7 @@ pp_check_ZIbeta_spat <- function(mod,y,X,P,n_rep,bin_width,test_quantities = FAL
     # save test statistics
     T_probzero <- c(T_probzero, mean(y_rep==0))
     T_mean <- c(T_mean, mean(y_rep))
-    T_mean_positive <- c(T_mean_positive, mean(y_rep[y_rep > 0]))
+    T_mean_positive <- c(T_mean_positive, ifelse(any(y_rep > 0), mean(y_rep[y_rep > 0]), 0))
     T_max <- c(T_max, max(y_rep))
   }
   

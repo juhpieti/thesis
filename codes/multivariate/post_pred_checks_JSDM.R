@@ -18,6 +18,9 @@ load("data/estonia_new/train/train_2020_2021_all_species_n100.Rdata")
 train <- train_n100_all_species
 colSums(train[,20:71] > 0)
 
+load("data/estonia_new/train/train_2020_2021_all_species_n500.Rdata")
+train <- train_n500_all_species
+
 ###################### DATA PREPARATION ##############################
 
 # remove species that are too rare (under 5 observations), and thus not used for modeling
@@ -177,7 +180,7 @@ pp_check_beta_JSDM <- function(mod,Y_mat,X,sp_name_list,n_rep=50,bin_width = 0.0
       # save the test statistics
       T_probzero <- c(T_probzero, mean(y_rep==0))
       T_mean <- c(T_mean, mean(y_rep))
-      T_mean_positive <- c(T_mean_positive, mean(y_rep[y_rep > 0]))
+      T_mean_positive <- c(T_mean_positive, ifelse(any(y_rep > 0), mean(y_rep[y_rep > 0]), 0))
       T_max <- c(T_max, max(y_rep))
       
       # save also the predicted dataset
@@ -242,7 +245,7 @@ pp_check_beta_JSDM <- function(mod,Y_mat,X,sp_name_list,n_rep=50,bin_width = 0.0
   return(y_rep_list)
 }
 
-plot_community_checks <- function(y_rep_list, Y_mat, plot_richness = FALSE, plot_euclidian_distances = FALSE, test_quantities = FALSE) {
+plot_community_checks <- function(y_rep_list, Y_mat, plot_richness = FALSE, plot_euclidian_distances = FALSE, test_quantities = FALSE, bin_width = 0.05) {
   ### DESCRIPTION OF THE FUNCTION
   # y_rep_list: list (with component for each species) of matrices (n_rep x n) that represent n_rep replicated datasets
   # Y_mat: observed percent covers
@@ -280,7 +283,7 @@ plot_community_checks <- function(y_rep_list, Y_mat, plot_richness = FALSE, plot
   if (plot_richness) {
     bin_width <- 1
   } else {
-    bin_width <- 0.05
+    bin_width <- bin_width
   }
   
   if (!test_quantities) {
@@ -460,16 +463,17 @@ plot_community_checks(Y_rep_list_stacked_SDM_base,Y/100,plot_richness = TRUE,plo
 
 ### do the same with 21 species?
 Y <- train[,20:71]
-Y_21 <- Y[,colSums(Y > 0) > 0]
-sp_names <- colnames(Y_21)
+Y_21 <- Y[,colSums(Y > 0) > 2]
+Y <- Y_21[,!colnames(Y_21) == "Ranunculus peltatus subsp_ Baudotii"] # drop 1 species for convenient J = 20
+sp_names <- colnames(Y)
 
 ### pp-checks with JSDM
 set.seed(123)
-mod.JSDM_21_species <- readRDS("models/multivariate/n_100/M1/JSDM_21species.RDS")
-Y_rep_list_JSDM_base <- pp_check_beta_JSDM(mod.JSDM_21_species,Y_21/100,X.sec_ord,sp_names,100,0.05,test_quantities = FALSE,rho_modeled = FALSE,1000,right_censoring = FALSE,1,0,0)
+mod.JSDM <- readRDS("models/multivariate/n_500/M1/JSDM_hier_priors.RDS")
+Y_rep_list_JSDM <- pp_check_beta_JSDM(mod.JSDM,Y/100,X.sec_ord,sp_names,100,0.05,test_quantities = TRUE,rho_modeled = FALSE,1000,right_censoring = FALSE,1,0,0)
 
 set.seed(42)
-plot_community_checks(Y_rep_list_JSDM_base,Y/100,plot_richness = FALSE,plot_euclidian_distances = FALSE,test_quantities = FALSE)
+plot_community_checks(Y_rep_list_JSDM,Y/100,plot_richness = FALSE,plot_euclidian_distances = FALSE,test_quantities = TRUE)
 
 
 pp_check_ZIbeta_JSDM <- function(mod,y,X,n_rep,bin_width=0.05, test_quantities = FALSE, rho_modeled = FALSE, C = 1000, right_censoring=FALSE, a=1,b=0.5,min_rho=0) {
@@ -716,11 +720,15 @@ pp_check_beta_spat_JSDM <- function(mod,Y_mat,X,sp_name_list,P,n_rep,bin_width=0
       alpha <- post.samples$alpha[idx,j]
       beta <- c(post.samples$beta_1[idx,,j], post.samples$beta_2[idx,,j])
       lambda <- post.samples$Lambda[idx,,j]
-      # latent factors (spatially correlated)
-      Z <- post.samples$phi[idx,,]
+      
+      # latent factors (spatially non-correlated part)
+      Z <- post.samples$Z[idx,,]
+      
+      # latent factors (spatially correlated part)
+      phi <- post.samples$phi[idx,,]
       
       # calculate latent f 
-      f <- alpha + X %*% beta + P %*% Z %*% lambda
+      f <- alpha + X %*% beta + (Z + P %*% phi) %*% lambda
       
       # calculate the corresponding mu
       mu <- inv_logit(f)
@@ -756,7 +764,7 @@ pp_check_beta_spat_JSDM <- function(mod,Y_mat,X,sp_name_list,P,n_rep,bin_width=0
       # save the test statistics
       T_probzero <- c(T_probzero, mean(y_rep==0))
       T_mean <- c(T_mean, mean(y_rep))
-      T_mean_positive <- c(T_mean_positive, mean(y_rep[y_rep > 0]))
+      T_mean_positive <- c(T_mean_positive, ifelse(any(y_rep > 0), mean(y_rep[y_rep > 0]), 0))
       T_max <- c(T_max, max(y_rep))
       
       # save also the predicted dataset

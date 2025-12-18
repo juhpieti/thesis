@@ -6,7 +6,7 @@
 # load in utility/helper functions
 source("codes/helpers.R")
 
-predict_beta_regression_JSDM <- function(stan_fit, X.pred, X.orig, sp_name_list, n_factors, thinning = 10, a = 1, rho_modeled = FALSE, C = 1000, b = 0.5, right_censored = FALSE, min_rho=0) {
+predict_beta_regression_JSDM <- function(stan_fit, X.pred, X.orig, sp_name_list, n_factors, thinning = 10, a = 1, rho_modeled = FALSE, C = 1000, b = 0.5, right_censored = FALSE, min_rho=0, without_latent_factors = FALSE) {
   ### function to make predictions with multivariate left-censored beta regression
   # X.pred: prediction matrix (mxp), m locations with p covariates
   # X.orig: non-scaled data matrix (nxp) to learn about the scaling parameters
@@ -19,6 +19,7 @@ predict_beta_regression_JSDM <- function(stan_fit, X.pred, X.orig, sp_name_list,
   # b: right-censoring constant
   # right_censored: Boolean to tell whether right-censoring is used
   # min_rho: minimum possible value for rho(x) (if rho is modeled with covariates)
+  # without_latent_factors: if TRUE, Z_i are automatically set 0, mainly due plotting purposes
   # RETURNS list of rep x m matrix of samples from posterior predictive for different quantities
   ### 1) latent linear predictors f 
   ### 2) predicted Ys
@@ -59,7 +60,11 @@ predict_beta_regression_JSDM <- function(stan_fit, X.pred, X.orig, sp_name_list,
   row_idx <- 1
   for (i in idx) {
     ### for each posterior draw, sample latent factors for prediction locations
-    Zpred <- matrix(rnorm(nrow(X.pred)*n_factors,0,1),ncol=n_factors) # (M x n_factor) matrix where M is number of prediction locations
+    if (without_latent_factors) {
+      Zpred <- matrix(0,nrow=nrow(X.pred),ncol=n_factors)
+    } else {
+      Zpred <- matrix(rnorm(nrow(X.pred)*n_factors,0,1),ncol=n_factors) # (M x n_factor) matrix where M is number of prediction locations
+    }
     
     ### go through J species
     for (j in 1:n_species) {
@@ -395,17 +400,19 @@ predict_spatial_beta_regression_JSDM <- function(stan_fit, X.pred, X.orig, pred.
   
   for(i in idx) {
     ### for each posterior draw, sample latent factors for prediction locations
-    Zpred <- matrix(NA,nrow=n_pred,ncol=n_factors)
+    #Zpred <- matrix(NA,nrow=n_pred,ncol=n_factors)
+    # NOTE, SPATIALLY CORRELATED PART WILL BE ADDED LATER ON
+    Zpred <- matrix(rnorm(nrow(X.pred)*n_factors,0,0.5),ncol=n_factors) # (M x n_factor) matrix where M is number of prediction locations
     
     # sample each latent factors (spatially correlated) separately
     for (k in 1:n_factors) {
-      phi_obs_ik <- post.samples$phi[i,,k] #observed (included in the training data) spatial latent factors, corrsepond to locations in S.obs
+      phi_obs_ik <- post.samples$phi[i,,k] #observed (included in the training data) spatial latent factors, corresponds to locations in S.obs
       l_ik <- post.samples$l[i,k] #length-scale of the k:th latent factor
       
       # calculate covariance block-matrices
-      K_pred_obs <- exp_covariance(S.pred,S.obs,1,l_ik) # magnitude s2 = 1
-      K_pred <- exp_covariance(S.pred,S.pred,1,l_ik) # magnitude s2 = 1
-      K_obs <- exp_covariance(S.obs,S.obs,1,l_ik) # magnitude s2 = 1
+      K_pred_obs <- exp_covariance(S.pred,S.obs,0.5,l_ik) # magnitude s2 = 0.5
+      K_pred <- exp_covariance(S.pred,S.pred,0.5,l_ik) # magnitude s2 = 0.5
+      K_obs <- exp_covariance(S.obs,S.obs,0.5,l_ik) # magnitude s2 = 0.5
       
       # mean and covariance for predicting phi in new locations given set of parameters and observed phi
       # justification for formulas can be read from Pietilä thesis (2025)
@@ -421,7 +428,7 @@ predict_spatial_beta_regression_JSDM <- function(stan_fit, X.pred, X.orig, pred.
       phi_pred_i <- phi_pred_m + L %*% rnorm(length(phi_pred_m))
       
       # store k:th latent factors per location
-      Zpred[,k] <- as.vector(P %*% phi_pred_i) # P matrix picks the correct random effects (from the grid cell that the prediction point belongs to)
+      Zpred[,k] <- Zpred[,k] + as.vector(P %*% phi_pred_i) # P matrix picks the correct random effects (from the grid cell that the prediction point belongs to)
       # save for output
       res_list$Z_mu_sam[row_idx,,k] <- as.vector(P %*% phi_pred_i)
     }

@@ -111,19 +111,23 @@ for (var_name in vars) {
 
 ### visualize study area and observations on map
 # load in the training data
+
 # either n = 2000
 load("data/estonia_new/train/train_2020_2021_n2000.Rdata")
-df_sub <- train_n2000
+train <- train_n2000
 
 # or n = 500 (used in modeling)
 load("data/estonia_new/train/train_2020_2021_n500.Rdata")
-df_sub <- train_n500
+train <- train_n500
+
+load("data/estonia_new/test/test_2020_2021_all_species_n500.Rdata")
+test <- test_n500_all_species
 
 # load in the spatial grid
 spatial_grid <- vect("data/estonia_new/spatial_random_effect_grid_20km/spatial_random_effect_grid_20km.shp")
 
-estonia_sub.vect <- vect(df_sub, geom = c("x","y"), crs = "EPSG:3067")
-train.vect.lonlat <- project(estonia_sub.vect, "EPSG:4326")
+train.vect <- vect(train, geom = c("x","y"), crs = "EPSG:3067")
+train.vect.lonlat <- project(train.vect, "EPSG:4326")
 #ext(estonia_sub.vect) <- ext(spatial_grid)
 
 ### load in the coastline as polygon
@@ -132,12 +136,15 @@ europe.vect.lonlat <- project(europe.vect, "EPSG:4326")
 europe.vect <- project(europe.vect, "EPSG:3067") #reproject to TM35FIN
 
 ### visualize spatial random effect grid
-subfolder <- paste0("n_",nrow(df_sub))
+im_width <- 800
+im_height <- 600
+subfolder <- paste0("n_",nrow(train))
 png(paste0("plots/estonia_new/training_data/",subfolder,"/spatial_effect_grid.png"), width = im_width, height = im_height)
+
 par(mfrow = c(1,1))
 plot(spatial_grid, xlab = "Easting (m)", ylab = "Northing (m)")
 plot(europe.vect, col = "lightgrey", add = TRUE)
-plot(estonia_sub.vect, add = TRUE, col = "red", cex = 0.7, alpha = 0.8)
+plot(train.vect, add = TRUE, col = "red", cex = 0.7, alpha = 0.8)
 
 ### add scale bar and north arrow
 sbar(xy = "bottomright", type = "bar", divs = 10, scaleby = 1000, below = "km")
@@ -146,19 +153,41 @@ north(xy = c(600000,6370000),type = 2)
 dev.off()
 
 ### same but without the grid on the background (just observations)
-subfolder <- paste0("n_",nrow(df_sub))
+subfolder <- paste0("n_",nrow(train))
 png(paste0("plots/estonia_new/training_data/",subfolder,"/study_area_close.png"), width = im_width, height = im_height)
 par(mfrow = c(1,1))
 #plot(spatial_grid, xlab = "Easting (m)", ylab = "Northing (m)", border = NA, background = "lightblue1")
 plot(spatial_grid, xlab = "Easting (m)", ylab = "Northing (m)", border = NA)
 #plot(europe.vect.cut, col = "darkseagreen3", add = TRUE)
 plot(europe.vect, col = "lightgrey", add = TRUE)
-plot(estonia_sub.vect, add = TRUE, col = "red", cex = 0.7, alpha = 0.8)
+plot(train.vect, add = TRUE, col = "red", cex = 0.7, alpha = 0.8)
 
 ### add scale bars
 sbar(d = 100000, xy = "bottomright", type = "bar", divs = 4, scaleby = 1000, below = "km")
 north(xy = c(600000,6370000),type = 2)
 dev.off()
+
+### visualize the test data along the training data
+test.vect <- vect(test, geom = c("x","y"), crs = "EPSG:3067")
+
+png("plots/estonia_new/train_test_split.png", width = im_width, height = im_height)
+par(mfrow = c(1,1))
+#plot(spatial_grid, xlab = "Easting (m)", ylab = "Northing (m)", border = NA, background = "lightblue1")
+plot(spatial_grid, xlab = "Easting (m)", ylab = "Northing (m)", border = NA)
+#plot(europe.vect.cut, col = "darkseagreen3", add = TRUE)
+plot(europe.vect, col = "lightgrey", add = TRUE)
+plot(train.vect, add = TRUE, col = "red", cex = 0.7, alpha = 0.8)
+plot(test.vect, add = TRUE, col = "blue", cex = 0.6, alpha = 0.5)
+
+### add scale bars
+sbar(d = 100000, xy = "bottomright", type = "bar", divs = 4, scaleby = 1000, below = "km")
+north(xy = c(600000,6370000),type = 2)
+
+### add legend
+legend(130000, 6640000, legend = c("train","test"), col = c("red","blue"), pch = 20, bty = "n")
+
+dev.off()
+
 
 ### create a large scale map to see better where the study are is located
 # crop for some region of interest in longitudes and latitudes
