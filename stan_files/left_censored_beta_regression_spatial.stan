@@ -48,24 +48,23 @@ parameters {
   vector[n_var/2] beta_1;
   vector<upper=0>[n_var/2] beta_2;
   
-  real alpha;
-  real<lower=0> rho; // scale parameter for beta distribution
+  real alpha; // intercept
+  real<lower=0> rho; // precision parameter for beta distribution
   
   real<lower=0> l; // length-scale parameter
   real<lower=0> s2_cf; // magnitude of the covariance function
   vector[n_obs_grid] z; // N(0,1) for creating the random effects
-  //vector[n_obs_grid] phi; // spatial effects modeled excplicitely
 }
 
 transformed parameters {
   vector[n_obs_grid] phi;// random effects
-  vector[N] mu;
+  vector[N] mu; // mean of beta
 
   {
     matrix[n_obs_grid,n_obs_grid] K; // covariance matrix
     matrix[n_obs_grid,n_obs_grid] L; // Cholesky of covariance matrix
 
-    // construct K
+    // construct covariance matrix K
     K = gp_exponential_cov(s_array,sqrt(s2_cf),l);
 
     // for (i in 1:n_obs_grid) {
@@ -87,35 +86,19 @@ transformed parameters {
 }
 
 model {
-  // spatial random effect
-  // matrix[n_obs_grid,n_obs_grid] K; // covariance matrix
-  // //matrix[n_obs_grid,n_obs_grid] L; // Cholesky of covariance matrix
-  // 
-  // // construct K that depends on s2, l
-  // for (i in 1:n_obs_grid) {
-  //   for (j in i:n_obs_grid) {
-  //     K[i,j] = s2_cf*exp(-(distance(s[i],s[j]))/l);
-  //     K[j,i] = s2_cf*exp(-(distance(s[i],s[j]))/l);
-  //   }
-  // }
-  
-  //K = K + diag_matrix(rep_vector(1e-08,n_obs_grid)); // add jitter for stability
-  //L = cholesky_decompose(K);
-  //phi ~ multi_normal_cholesky(rep_vector(0,n_obs_grid),L); //GP(0,K)
-  //phi ~ multi_normal(rep_vector(0,n_obs_grid),K); //GP(0,K)
-  
+
   // priors for coefficients
   beta_1 ~ normal(0,sqrt(1));
   beta_2 ~ normal(0,sqrt(1));
 
-  alpha ~ normal(0,sqrt(2)); 
-  rho ~ cauchy(0,sqrt(10));
+  alpha ~ normal(0,sqrt(2));  // intercept
+  rho ~ cauchy(0,sqrt(10)); // precision for beta
   
-  z ~ normal(0,1);
+  z ~ normal(0,1); // N(0,1) to create spatial random effects
   
   // priors for covariance function
-  s2_cf ~ student_t(4,0,sqrt(0.1));
-  l ~ cauchy(8,sqrt(50));
+  s2_cf ~ student_t(4,0,sqrt(0.1)); //magnitude
+  l ~ cauchy(8,sqrt(50)); // length-scale
   
   for (i in 1:N) {
     target += lc_beta_density(y[i],mu[i],rho,a,eps,N);

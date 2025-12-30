@@ -46,6 +46,7 @@ parameters {
 }
 
 transformed parameters{
+  // expected value of beta
   vector[N] mu;
   mu = inv_logit(alpha + X*append_row(beta_1,beta_2));
 }
@@ -55,8 +56,11 @@ model {
   beta_1 ~ normal(0,sqrt(1));
   beta_2 ~ normal(0,sqrt(1));
 
-  alpha ~ normal(0,sqrt(2)); // ORIGINAL
-  rho ~ cauchy(0,sqrt(10));
+  // intercept
+  alpha ~ normal(0,sqrt(2)); 
+  
+  // precision
+  rho ~ cauchy(0,sqrt(10)); 
   
   // likelihood terms
   for (i in 1:N) {
