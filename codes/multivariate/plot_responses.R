@@ -71,7 +71,7 @@ plot_responses_SDM <- function(stan_fit, X, grid_length = 200, thinning = 100, s
 }
 
 grid_length <- 200
-thinning <- 100
+thinning <- 40
 scale_curves <- FALSE
 
 # image size for saving purposes
@@ -311,7 +311,7 @@ plot_ytot_responses_2stage <- function(stan_fit, X, grid_length = 200, thinning 
   for (i in 1:ncol(X)) {
     ymin <- ifelse(scale_curves, 0,min(all_vars_preds[,i]))
     ymax <- ifelse(scale_curves,1,max(all_vars_preds[,i]))
-    plot(grid_matrix[,i],all_vars_preds[,i],type="l",ylab = "value", xlab = colnames(X)[i], main = "", ylim = c(ymin,ymax))
+    plot(grid_matrix[,i],all_vars_preds[,i],type="l",ylab = "E[y_tot]", xlab = colnames(X)[i], main = "", ylim = c(ymin,ymax))
   }
 }
 

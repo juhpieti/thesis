@@ -30,6 +30,6 @@ test_idx <- sample(1:nrow(test_full_all_species), m)
 test_n500_all_species <- test_full_all_species[test_idx, ]
 
 ### save the test sets
-save(test_full_all_species, file = "data/estonia_new/test/test_2020_2021_all_species_full.Rdata")
+save(test_full_all_species, file = "data/estonia_new/test/test_2020_2021_all_species_full_except_n500.Rdata")
 save(test_n500_all_species, file = "data/estonia_new/test/test_2020_2021_all_species_n500.Rdata")
 

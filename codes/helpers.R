@@ -1,6 +1,6 @@
 ####################################################################################
 ### THIS SCRIPT INCLUDES A LOTS OF FUNCTIONS THAT ARE UTILIZED IN OTHERS SCRIPTS ###
-### FUNCTIONS ARE LOADED WITH load(path/helpers.R) IN OTHER SCRIPTS              ###
+### FUNCTIONS ARE LOADED WITH source(path/helpers.R) IN OTHER SCRIPTS            ###
 ####################################################################################
 
 # load in libraries

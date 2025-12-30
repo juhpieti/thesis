@@ -37,7 +37,7 @@ predict_beta_regression_JSDM <- function(stan_fit, X.pred, X.orig, sp_name_list,
   n_pred <- nrow(Xpred)
   
   # extract posterior draws (all model parameters)
-  post.samples <- extract(stan_fit)
+  post.samples <- rstan::extract(stan_fit)
   n_post_samples <- length(post.samples$lp__)
   
   # thin the posterior sample (take only every 10th)

@@ -93,10 +93,10 @@ predict_DirMult_NegBin_regression <- function(stan_fit, X.pred, X.orig, sp_name_
     f_i <- alpha_i + Xpred %*% beta_i + Zpred %*% lambda_i ### n_pred x J matrix
     mu_i <- t(apply(f_i,1,softmax)) ### n_pred x J matrix
     
-    ### calculate expectations and probabilities of zero
+    ### calculate expectations (possibly probability of zero)
     EYi <- muM_i*mu_i # expected total coverage * expected proportions
     #probzero_i <- 
-    
+
     ### sample Ys
     M_i <- rnbinom(n_pred,size=scale_M_i,mu=muM_i) # total coverage from Negative-Binomial
     res_list$Ytot_sam[row_idx, ] <- M_i #save the prediction

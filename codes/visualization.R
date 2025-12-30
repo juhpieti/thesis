@@ -44,7 +44,6 @@ subfolder <- paste0("n_",nrow(estonia_sub))
 
 #png(paste0("plots/estonia_new/training_data/",subfolder,"/counts_with_prevalences.png"), width = im_width, height = im_height)
 png(paste0("plots/estonia_new/training_data/",subfolder,"/counts_with_prevalences_20_species.png"), width = im_width, height = im_height)
-
 par(mfrow = c(4,5),
     mar = c(4,4,2,1))
 for (sp_name in sp_list) {

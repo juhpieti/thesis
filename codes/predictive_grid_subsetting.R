@@ -229,7 +229,6 @@ writeVector(predictive_grid_wo_deep_sea,filename = "data/estonia_new/predictive_
 
 
 
-
 ### VISUALIZE THE COVARIATES AS MAPS
 vect_grid <- vect("data/estonia_new/predictive_grid_1km_all_variables_2021_july/predictive_grid_1km_all_variables_2021_july.shp")
 #vect_grid$depth <- -1*vect_grid$depth

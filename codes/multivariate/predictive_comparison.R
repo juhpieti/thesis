@@ -67,7 +67,7 @@ for (i in 1:nrow(train)) {
 observed_grid_cells.df <- observed_grid_cells.df/1000
 
 ### make predictions for test set
-thinning <- 40
+thinning <- 40 #do not use all of the posterior sample
 
 # STACKED SDMS (non-spatial)
 n_species <- length(sp_names)

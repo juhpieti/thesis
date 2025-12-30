@@ -5,6 +5,8 @@
 
 ### models fitted with separate R-scripts (joint_beta_regression.R, joint_zi_beta_regression.R, joint_beta_regression_spatial.R, joint_zi_beta_regression_spatial.R)
 ### this script loads fitted models and draws different maps and curves, as well as produces tables
+
+# load in packages
 library(terra)
 library(loo)
 
@@ -25,7 +27,7 @@ colnames(train)
 colSums(train[,20:38] > 0)
 
 # remove species that are too rare (under 5 observations)
-train <- train[,!(colnames(train) %in% c("Furcellaria lumbricalis loose form","Tolypella nidifica","Chara tomentosa"))]
+#train <- train[,!(colnames(train) %in% c("Furcellaria lumbricalis loose form","Tolypella nidifica","Chara tomentosa"))]
 
 # prepare the covariate matrix
 X <- train[,11:19]
@@ -36,6 +38,12 @@ X <- X[,-which(colnames(X) == "zsd")] #remove secchi depth since it is not inter
 X.scaled <- scale_covariates(X)
 ### add the second order terms
 X.sec_ord <- add_second_order_terms(X.scaled,colnames(X.scaled))
+
+Y <- train[,20:71]
+idx_positive <- colSums(Y > 0) > 0 # take only species that have some observations
+sum(idx_positive) # it's 21 of those
+Y_21 <- Y[,idx_positive]
+Y <- Y_21[,!colnames(Y_21) == "Ranunculus peltatus subsp_ Baudotii"] # drop 1 species for convenient J = 20
 
 # load in the predictive grid
 predictive_grid <- vect("data/estonia_new/predictive_grid_1km_all_variables_2021_july/predictive_grid_1km_all_variables_2021_july.shp")
@@ -260,16 +268,15 @@ plot_map_JSDM(stacked_SDM_predictions,pred_grid_1km_2021_july_df[,c("x","y")],pr
 
 ### 2) JSDM
 
-# load model (21 species)
-fit.JSDM.21species <- readRDS("models/multivariate/n_100/M1/JSDM_21species.RDS")
-fit.JSDM.21species.hier.prior <- readRDS("models/multivariate/n_100/M1/JSDM_21species_hierarchical_priors.RDS") 
-fit.JSDM.4species <- readRDS("models/multivariate/n_100/9_covariates/JSDM_test.RDS")
+# load model (20 species)
+fit.JSDM.20species <- readRDS("models/multivariate/n_100/M1/JSDM_20species_hier_priors.RDS")
 
 # predict (J=4)
-sp_names <- c("Cladophora glomerata","Fucus vesiculosus","Mytilus trossulus","Stuckenia pectinata")
+sp_names <- colnames(Y)
+
 set.seed(42)
-JSDM_predictions_4species <- predict_beta_regression_JSDM(fit.JSDM.4species,pred_grid_1km_2021_july_df[,colnames(X)],X,sp_names,2,100,1,FALSE,1000,0,FALSE,0)
-plot_map_JSDM(JSDM_predictions_4species,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,summary_maps = TRUE)
+JSDM_predictions_20species <- predict_beta_regression_JSDM(fit.JSDM.20species,pred_grid_1km_2021_july_df[,colnames(X)],X,sp_names,2,100,1,FALSE,1000,0,FALSE,0)
+plot_map_JSDM(JSDM_predictions_20species,pred_grid_1km_2021_july_df[,c("x","y")],predictive_grid,"cover",0.7,sp_names,summary_maps = TRUE)
 
 
 

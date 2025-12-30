@@ -892,7 +892,7 @@ pp_check_2stage <- function(mod,Y_mat,X,sp_name_list,n_rep=50,bin_width = 0.05,t
     
     # plot the observed data first
     if (!test_quantities) { 
-      hist(y, breaks = breaks, xlim = c(0,100), main = "obs", ylim = c(0,length(y)), freq = TRUE)
+      hist(y, breaks = c(-5,0,seq(5,100,by=5)), xlim = c(0,100), main = "obs", ylim = c(0,length(y)), freq = TRUE)
     }
     
     # go through n_rep posterior samples again
@@ -1095,7 +1095,7 @@ pp_check_2stage_spat <- function(mod,Y_mat,X,sp_name_list,P,n_rep,bin_width=0.05
     
     # plot the observed data first
     if (!test_quantities) { 
-      hist(y, breaks = breaks, xlim = c(0,100), main = "obs", ylim = c(0,length(y)), freq = TRUE)
+      hist(y, breaks = c(-5,0,seq(5,100,by=5)), xlim = c(0,100), main = "obs", ylim = c(0,length(y)), freq = TRUE)
     }
     
     # go through n_rep posterior samples again
@@ -1716,24 +1716,33 @@ n_rep <- 200 #number of replicated datasets
 im_width <- 800
 im_height <- 600
 
-
 ### 1) SSDM (non-spatial)
 Y_rep_list_SSDM <- list()
-set.seed(123)
 
 sp_names <- colnames(Y)
 subfolder <- paste0("n_",nrow(Y))
 
 for(sp_name in sp_names) {
+  # load the model
   sp_name_modified <- gsub(" ","_",sp_name)
   sp_name_modified <- gsub("/","_",sp_name_modified)
   mod <- readRDS(paste0("models/",subfolder,"/M1/",sp_name_modified,".rds"))
+  
+  # save the test quantities
   png(paste0("plots/final_results/SSDM/",subfolder,"/M1/pp_checks/pp_check_",sp_name_modified,".png"), width = im_width, height = im_height)
+  set.seed(123)
   Y_mat <- pp_check_beta(mod, Y[,sp_name]/100,X.sec_ord,n_rep,0.05,test_quantities = TRUE, rho_modeled = FALSE, 1000,FALSE,1,0,0)
   dev.off()
   Y_rep_list_SSDM[[sp_name]] <- Y_mat
+  
+  # save the replicated datasets
+  png(paste0("plots/final_results/SSDM/",subfolder,"/M1/pp_checks/replicates/pp_rep_",sp_name_modified,".png"), width = im_width, height = im_height)
+  set.seed(123)
+  tmp <- pp_check_beta(mod, Y[,sp_name]/100,X.sec_ord,n_rep,0.05,test_quantities = FALSE, rho_modeled = FALSE, 1000,FALSE,1,0,0)
+  dev.off()
 }
 
+# community checks
 set.seed(42)
 png(paste0("plots/final_results/SSDM/",subfolder,"/M1/pp_checks/community_pp_check_testquantities.png"), width = im_width, height = im_height)
 plot_community_checks(Y_rep_list_SSDM,Y/100, plot_richness = FALSE,plot_euclidian_distances = FALSE, test_quantities = TRUE)
@@ -1742,6 +1751,7 @@ png(paste0("plots/final_results/SSDM/",subfolder,"/M1/pp_checks/community_pp_che
 plot_community_checks(Y_rep_list_SSDM,Y/100, plot_richness = FALSE,plot_euclidian_distances = FALSE, test_quantities = FALSE)
 dev.off()
 
+# save also the distances ||ỹ_i-y_i||
 Y_rep_list_SSDM.copy <- lapply(Y_rep_list_SSDM,function(x) x*100)
 png(paste0("plots/final_results/SSDM/",subfolder,"/M1/pp_checks/community_pp_check_rmse.png"), width = im_width, height = im_height)
 plot_community_checks(Y_rep_list_SSDM.copy,Y, plot_richness = FALSE,plot_euclidian_distances = TRUE, test_quantities = TRUE,bin_width = 5)
@@ -1750,17 +1760,27 @@ dev.off()
 ### 2) SSDM (spatial)
 Y_rep_list_SSDM.spat <- list()
 
-set.seed(123)
 for(sp_name in sp_names) {
+  # load the model
   sp_name_modified <- gsub(" ","_",sp_name)
   sp_name_modified <- gsub("/","_",sp_name_modified)
   mod <- readRDS(paste0("models/",subfolder,"/M3/",sp_name_modified,".rds"))
+  
+  # save the test quantities
   png(paste0("plots/final_results/SSDM/",subfolder,"/M3/pp_checks/pp_check_",sp_name_modified,".png"), width = im_width, height = im_height)
+  set.seed(123)
   Y_mat <- pp_check_beta_spat(mod, Y[,sp_name]/100,X.sec_ord,P,n_rep,0.05,test_quantities = TRUE, rho_modeled = FALSE,1000,1)
   dev.off()
   Y_rep_list_SSDM.spat[[sp_name]] <- Y_mat
+  
+  # save the replicated data sets
+  png(paste0("plots/final_results/SSDM/",subfolder,"/M3/pp_checks/replicates/pp_rep_",sp_name_modified,".png"), width = im_width, height = im_height)
+  set.seed(123) # to sample same Y_reps
+  tmp <- pp_check_beta_spat(mod, Y[,sp_name]/100,X.sec_ord,P,n_rep,0.05,test_quantities = FALSE, rho_modeled = FALSE,1000,1)
+  dev.off()
 }
 
+# community checks
 set.seed(42)
 png(paste0("plots/final_results/SSDM/",subfolder,"/M3/pp_checks/community_pp_check_testquantities.png"), width = im_width, height = im_height)
 plot_community_checks(Y_rep_list_SSDM.spat,Y/100, plot_richness = FALSE,plot_euclidian_distances = FALSE, test_quantities = TRUE)
@@ -1769,18 +1789,26 @@ png(paste0("plots/final_results/SSDM/",subfolder,"/M3/pp_checks/community_pp_che
 plot_community_checks(Y_rep_list_SSDM.spat,Y/100, plot_richness = FALSE,plot_euclidian_distances = FALSE, test_quantities = FALSE)
 dev.off()
 
+# save also the distances ||ỹ_i-y_i||
 Y_rep_list_SSDM.spat.copy <- lapply(Y_rep_list_SSDM.spat,function(x) x*100)
 png(paste0("plots/final_results/SSDM/",subfolder,"/M3/pp_checks/community_pp_check_rmse.png"), width = im_width, height = im_height)
 plot_community_checks(Y_rep_list_SSDM.spat.copy,Y, plot_richness = FALSE,plot_euclidian_distances = TRUE, test_quantities = TRUE,bin_width = 5)
 dev.off()
 
 ### 3) JSDM (non-spatial)
+# species level checks (test quantities)
 set.seed(123)
 mod.JSDM <- readRDS(paste0("models/multivariate/",subfolder,"/M1/JSDM_hier_priors.RDS"))
 save_loc <- paste0("plots/final_results/JSDM/",subfolder,"/M1/pp_checks/")
 Y_rep_list_JSDM <- pp_check_beta_JSDM(mod.JSDM,Y/100,X.sec_ord,sp_names,n_rep,0.05,test_quantities = TRUE,rho_modeled = FALSE,1000,FALSE,1,0,0,
                                       save_plot = TRUE,save_loc = save_loc,im_height = im_height, im_width = im_width)
+# species level checks (replicated datasets)
+save_loc <- paste0("plots/final_results/JSDM/",subfolder,"/M1/pp_checks/replicates/")
+set.seed(123)
+tmp <- pp_check_beta_JSDM(mod.JSDM,Y/100,X.sec_ord,sp_names,n_rep,0.05,test_quantities = FALSE,rho_modeled = FALSE,1000,FALSE,1,0,0,
+                                      save_plot = TRUE,save_loc = save_loc,im_height = im_height, im_width = im_width)
 
+# community checks
 set.seed(42)
 png(paste0("plots/final_results/JSDM/",subfolder,"/M1/pp_checks/community_pp_check_testquantities.png"), width = im_width, height = im_height)
 plot_community_checks(Y_rep_list_JSDM,Y/100, plot_richness = FALSE,plot_euclidian_distances = FALSE, test_quantities = TRUE)
@@ -1789,18 +1817,26 @@ png(paste0("plots/final_results/JSDM/",subfolder,"/M1/pp_checks/community_pp_che
 plot_community_checks(Y_rep_list_JSDM,Y/100, plot_richness = FALSE,plot_euclidian_distances = FALSE, test_quantities = FALSE)
 dev.off()
 
+# save also the distances ||ỹ_i-y_i||
 Y_rep_list_JSDM.copy <- lapply(Y_rep_list_JSDM,function(x) x*100)
 png(paste0("plots/final_results/JSDM/",subfolder,"/M1/pp_checks/community_pp_check_rmse.png"), width = im_width, height = im_height)
 plot_community_checks(Y_rep_list_JSDM.copy,Y, plot_richness = FALSE,plot_euclidian_distances = TRUE, test_quantities = TRUE,bin_width = 5)
 dev.off()
 
 ### 4) JSDM (spatial)
+# species level checks (test quantities)
 set.seed(123)
 mod.JSDM.spat <- readRDS(paste0("models/multivariate/",subfolder,"/M3/JSDM_spatial_hier_priors.RDS"))
 save_loc <- paste0("plots/final_results/JSDM/",subfolder,"/M3/pp_checks/")
 Y_rep_list_JSDM.spat <- pp_check_beta_spat_JSDM(mod.JSDM.spat,Y/100,X.sec_ord,sp_names,P,n_rep,0.05,test_quantities = TRUE,rho_modeled = FALSE,1000,FALSE,1,0,0,
                                                 save_plot = TRUE, save_loc = save_loc, im_height = im_height, im_width = im_width)
+# species level checks (replicated datasets)
+save_loc <- paste0("plots/final_results/JSDM/",subfolder,"/M3/pp_checks/replicates/")
+set.seed(123)
+tmp <- pp_check_beta_spat_JSDM(mod.JSDM.spat,Y/100,X.sec_ord,sp_names,P,n_rep,0.05,test_quantities = FALSE,rho_modeled = FALSE,1000,FALSE,1,0,0,
+                                                save_plot = TRUE, save_loc = save_loc, im_height = im_height, im_width = im_width)
 
+# community checks
 set.seed(42)
 png(paste0("plots/final_results/JSDM/",subfolder,"/M3/pp_checks/community_pp_check_testquantities.png"), width = im_width, height = im_height)
 plot_community_checks(Y_rep_list_JSDM,Y/100, plot_richness = FALSE,plot_euclidian_distances = FALSE, test_quantities = TRUE)
@@ -1809,17 +1845,24 @@ png(paste0("plots/final_results/JSDM/",subfolder,"/M3/pp_checks/community_pp_che
 plot_community_checks(Y_rep_list_JSDM,Y/100, plot_richness = FALSE,plot_euclidian_distances = FALSE, test_quantities = FALSE)
 dev.off()
 
+# save also the distances ||ỹ_i-y_i||
 Y_rep_list_JSDM.spat.copy <- lapply(Y_rep_list_JSDM.spat,function(x) x*100)
 png(paste0("plots/final_results/JSDM/",subfolder,"/M3/pp_checks/community_pp_check_rmse.png"), width = im_width, height = im_height)
 plot_community_checks(Y_rep_list_JSDM.spat.copy,Y, plot_richness = FALSE,plot_euclidian_distances = TRUE, test_quantities = TRUE,bin_width = 5)
 dev.off()
 
 ### 5) 2-stage (non-spatial)
+# species level checks (test quantities)
 set.seed(123)
 mod.2stage <- readRDS(paste0("models/two_stage/",subfolder,"/M1/JSDM_NegBin_DirMult_hier_priors.RDS"))
 save_loc <- paste0("plots/final_results/two_stage/",subfolder,"/M1/pp_checks/")
 Y_rep_list_2stage <- pp_check_2stage(mod.2stage,Y,X.sec_ord,sp_names,n_rep,5,test_quantities = TRUE,save_plot = TRUE, save_loc = save_loc, im_width = im_width, im_height = im_height)
+# species level checks (replicated datasets)
+save_loc <- paste0("plots/final_results/two_stage/",subfolder,"/M1/pp_checks/replicates/")
+set.seed(123)
+tmp <- pp_check_2stage(mod.2stage,Y,X.sec_ord,sp_names,n_rep,5,test_quantities = FALSE,save_plot = TRUE, save_loc = save_loc, im_width = im_width, im_height = im_height)
 
+# community checks
 set.seed(42)
 png(paste0("plots/final_results/two_stage/",subfolder,"/M1/pp_checks/community_pp_check_testquantities.png"), width = im_width, height = im_height)
 plot_community_checks(Y_rep_list_2stage,Y, plot_richness = FALSE,plot_euclidian_distances = FALSE, test_quantities = TRUE)
@@ -1828,16 +1871,23 @@ png(paste0("plots/final_results/two_stage/",subfolder,"/M1/pp_checks/community_p
 plot_community_checks(Y_rep_list_2stage,Y, plot_richness = FALSE,plot_euclidian_distances = FALSE, test_quantities = FALSE,bin_width = 5)
 dev.off()
 
+# save also the distances ||ỹ_i-y_i||
 png(paste0("plots/final_results/two_stage/",subfolder,"/M1/pp_checks/community_pp_check_rmse.png"), width = im_width, height = im_height)
 plot_community_checks(Y_rep_list_2stage,Y, plot_richness = FALSE,plot_euclidian_distances = TRUE, test_quantities = TRUE,bin_width = 5)
 dev.off()
 
 ### 6) 2-stage (spatial)
+# species level checks (test quantities)
 set.seed(123)
 mod.2stage.spat <- readRDS(paste0("models/two_stage/",subfolder,"/M3/JSDM_NegBin_DirMult_spatial_hier_priors.RDS"))
 save_loc <- paste0("plots/final_results/two_stage/",subfolder,"/M3/pp_checks/")
 Y_rep_list_2stage.spat <- pp_check_2stage_spat(mod.2stage.spat,Y,X.sec_ord,sp_names,P,n_rep,5,test_quantities = TRUE,save_plot = TRUE, save_loc = save_loc, im_width = im_width, im_height = im_height)
+# species level checks (replicated datasets)
+save_loc <- paste0("plots/final_results/two_stage/",subfolder,"/M3/pp_checks/replicates/")
+set.seed(123)
+tmp <- pp_check_2stage_spat(mod.2stage.spat,Y,X.sec_ord,sp_names,P,n_rep,5,test_quantities = FALSE,save_plot = TRUE, save_loc = save_loc, im_width = im_width, im_height = im_height)
 
+# community checks
 set.seed(42)
 png(paste0("plots/final_results/two_stage/",subfolder,"/M3/pp_checks/community_pp_check_testquantities.png"), width = im_width, height = im_height)
 plot_community_checks(Y_rep_list_2stage.spat,Y, plot_richness = FALSE,plot_euclidian_distances = FALSE, test_quantities = TRUE)
@@ -1846,6 +1896,8 @@ png(paste0("plots/final_results/two_stage/",subfolder,"/M3/pp_checks/community_p
 plot_community_checks(Y_rep_list_2stage.spat,Y, plot_richness = FALSE,plot_euclidian_distances = FALSE, test_quantities = FALSE,bin_width = 5)
 dev.off()
 
+# save also the distances ||ỹ_i-y_i||
 png(paste0("plots/final_results/two_stage/",subfolder,"/M3/pp_checks/community_pp_check_rmse.png"), width = im_width, height = im_height)
 plot_community_checks(Y_rep_list_2stage.spat,Y, plot_richness = FALSE,plot_euclidian_distances = TRUE, test_quantities = TRUE,bin_width = 5)
 dev.off()
+g
